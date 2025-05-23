@@ -22,6 +22,19 @@ Native Payments is designed to be both powerful and adaptable to your needs:
 
 Native Payments gives you the robustness of enterprise payment infrastructure with the flexibility to implement exactly what your business needs.
 
+## Quick Start by Business Model
+
+Choose your setup based on what you're building:
+
+- **🛒 E-commerce Store**: `users` + `orders` + `payments` + `products`
+- **💳 Payment Processing**: `users` + `payments` (minimal setup)
+- **🔄 SaaS/Subscriptions**: `users` + `subscriptions` + `invoices` + `payments`
+- **🎯 Membership Site**: `users` + `memberships` + `payments`
+- **🏢 B2B/Teams**: Add `organizations` to any of the above
+- **📊 Want Analytics?**: Add `analytics_snapshots` for insights
+
+👉 **[See detailed use cases guide](./docs/use-cases.md)** to know exactly which tables you need.
+
 ## Features
 
 - **Multi-Provider Support**: Integrate with multiple payment providers through a unified API
@@ -38,22 +51,26 @@ Native Payments gives you the robustness of enterprise payment infrastructure wi
 - **Webhook Handling**: Process provider webhooks for real-time updates
 - **Extensible Architecture**: Easily add new payment providers or features
 
-## Coming Soon
+## Optional Features
 
-- **Analytics & Reporting Dashboard** (Coming Soon)
+- **Analytics & Reporting System** (Optional)
+  - Smart snapshot-based analytics for optimal performance
   - Revenue metrics and financial reporting
   - Subscription analytics (MRR, churn, LTV)
   - Membership insights and feature usage
   - Customer segmentation and behavior analysis
-  - Customizable dashboards and export options
+  - On-demand calculation with automatic caching
+  - [Learn more about Analytics](./docs/analytics.md)
 
 ## Documentation
 
+- [Use Cases Guide](./docs/use-cases.md): **Start here!** Which tables do you actually need?
 - [Database Schema](./docs/database-schema.md): Database tables and relationships
 - [API Routes](./docs/api-routes.md): REST API endpoints and request/response formats
 - [Implementation Guide](./docs/implementation-guide.md): Step-by-step guide for implementing the payment system
 - [Provider Integration](./docs/providers/index.md): Detailed instructions for integrating specific payment providers
 - [Membership System](./docs/membership-api.md): Guide to implementing feature-based access control
+- [Analytics System](./docs/analytics.md): Optional analytics and reporting features
 - [Examples](./docs/examples/index.md): Example implementations for different business models
 
 ## Database Structure
@@ -90,8 +107,14 @@ The payment system provides a RESTful API with the following main endpoints:
 - `/api/payment/users/:userId/addons`: Add-on feature purchases
 - `/api/payment/access/verify`: Feature access verification
 
-**Coming Soon:**
-- `/api/payment/analytics/*`: Analytics and reporting endpoints for revenue metrics, subscription insights, and customer behavior
+**Optional Analytics Endpoints:**
+- `/api/payment/analytics/revenue`: Revenue analytics with smart caching
+- `/api/payment/analytics/subscriptions`: Subscription metrics and MRR tracking
+- `/api/payment/analytics/customers`: Customer insights and LTV analysis
+- `/api/payment/analytics/customers/:userId/revenue`: Individual customer revenue analysis
+- `/api/payment/analytics/memberships`: Membership analytics and feature usage
+- `/api/payment/analytics/cohorts`: Cohort analysis for customer retention
+- `/api/payment/analytics/events`: Event tracking and funnel analysis
 
 ## Implementation
 

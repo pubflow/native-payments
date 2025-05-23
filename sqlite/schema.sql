@@ -72,6 +72,37 @@ BEGIN
     UPDATE organization_users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
+-- Addresses
+CREATE TABLE IF NOT EXISTS addresses (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    organization_id TEXT,
+    type TEXT NOT NULL, -- 'billing', 'shipping'
+    first_name TEXT,
+    last_name TEXT,
+    company TEXT,
+    address_line_1 TEXT NOT NULL,
+    address_line_2 TEXT,
+    city TEXT NOT NULL,
+    state TEXT,
+    postal_code TEXT NOT NULL,
+    country TEXT NOT NULL,
+    phone TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+);
+
+-- Trigger for updated_at on addresses
+CREATE TRIGGER IF NOT EXISTS update_addresses_timestamp
+AFTER UPDATE ON addresses
+BEGIN
+    UPDATE addresses SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
 -- Payment Providers
 CREATE TABLE IF NOT EXISTS payment_providers (
     id TEXT PRIMARY KEY, -- 'stripe', 'paypal', 'authorize_net', etc.
@@ -416,6 +447,9 @@ BEGIN
 END;
 
 -- Indexes for performance
+CREATE INDEX idx_addresses_user_id ON addresses(user_id);
+CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
+CREATE INDEX idx_addresses_type ON addresses(type);
 CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
 CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
@@ -437,3 +471,69 @@ CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
 CREATE INDEX idx_user_memberships_status ON user_memberships(status);
+CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
+CREATE INDEX idx_addresses_user_id ON addresses(user_id);
+CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
+CREATE INDEX idx_addresses_type ON addresses(type);
+
+-- Analytics Tables (Optional Feature)
+-- These tables can be added to enable advanced analytics and reporting
+
+-- Analytics Snapshots (Core analytics table)
+CREATE TABLE IF NOT EXISTS analytics_snapshots (
+    id TEXT PRIMARY KEY,
+    snapshot_date TEXT NOT NULL, -- DATE format: YYYY-MM-DD
+    metric_type TEXT NOT NULL, -- 'daily_revenue', 'active_subscriptions', etc.
+    metric_value REAL NOT NULL,
+    currency TEXT,
+    breakdown TEXT, -- JSON string with detailed breakdown
+    calculation_method TEXT DEFAULT 'scheduled', -- 'scheduled', 'on_demand', 'manual'
+    calculation_duration_ms INTEGER, -- How long the calculation took
+    data_freshness TEXT DEFAULT 'historical', -- 'historical', 'recent', 'real_time'
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(snapshot_date, metric_type, currency)
+);
+
+-- Trigger for updated_at on analytics_snapshots
+CREATE TRIGGER IF NOT EXISTS update_analytics_snapshots_timestamp
+AFTER UPDATE ON analytics_snapshots
+BEGIN
+    UPDATE analytics_snapshots SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Analytics Events (Optional - for detailed event tracking)
+CREATE TABLE IF NOT EXISTS analytics_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    session_id TEXT,
+    event_type TEXT NOT NULL, -- 'payment_completed', 'subscription_created', etc.
+    event_category TEXT, -- 'revenue', 'conversion', 'engagement'
+    entity_type TEXT, -- 'order', 'subscription', 'membership'
+    entity_id TEXT,
+    properties TEXT, -- JSON string with event-specific data
+    revenue_cents INTEGER DEFAULT 0,
+    currency TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- User Cohorts (Optional - for cohort analysis)
+CREATE TABLE IF NOT EXISTS user_cohorts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    cohort_month TEXT NOT NULL, -- DATE format: YYYY-MM-01 (first day of month)
+    cohort_type TEXT NOT NULL, -- 'first_purchase', 'first_subscription'
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(user_id, cohort_type)
+);
+
+-- Analytics Indexes
+CREATE INDEX idx_analytics_snapshots_date_type ON analytics_snapshots(snapshot_date, metric_type);
+CREATE INDEX idx_analytics_snapshots_currency ON analytics_snapshots(currency);
+CREATE INDEX idx_analytics_events_user_id ON analytics_events(user_id);
+CREATE INDEX idx_analytics_events_type ON analytics_events(event_type);
+CREATE INDEX idx_analytics_events_category ON analytics_events(event_category);
+CREATE INDEX idx_user_cohorts_month ON user_cohorts(cohort_month);
+CREATE INDEX idx_user_cohorts_type ON user_cohorts(cohort_type);

@@ -341,6 +341,9 @@ CREATE TABLE IF NOT EXISTS user_memberships (
 );
 
 -- Indexes for performance
+CREATE INDEX idx_addresses_user_id ON addresses(user_id);
+CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
+CREATE INDEX idx_addresses_type ON addresses(address_type);
 CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
 CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
@@ -362,3 +365,59 @@ CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
 CREATE INDEX idx_user_memberships_status ON user_memberships(status);
+CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
+
+-- Analytics Tables (Optional Feature)
+-- These tables can be added to enable advanced analytics and reporting
+
+-- Analytics Snapshots (Core analytics table)
+CREATE TABLE IF NOT EXISTS analytics_snapshots (
+    id VARCHAR(255) PRIMARY KEY,
+    snapshot_date DATE NOT NULL,
+    metric_type VARCHAR(50) NOT NULL, -- 'daily_revenue', 'active_subscriptions', etc.
+    metric_value DECIMAL(20, 2) NOT NULL,
+    currency VARCHAR(3),
+    breakdown JSON, -- Detailed breakdown of the metric
+    calculation_method VARCHAR(50) DEFAULT 'scheduled', -- 'scheduled', 'on_demand', 'manual'
+    calculation_duration_ms INT, -- How long the calculation took
+    data_freshness VARCHAR(50) DEFAULT 'historical', -- 'historical', 'recent', 'real_time'
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_snapshot (snapshot_date, metric_type, currency)
+);
+
+-- Analytics Events (Optional - for detailed event tracking)
+CREATE TABLE IF NOT EXISTS analytics_events (
+    id VARCHAR(255) PRIMARY KEY,
+    user_id VARCHAR(255),
+    session_id VARCHAR(255),
+    event_type VARCHAR(50) NOT NULL, -- 'payment_completed', 'subscription_created', etc.
+    event_category VARCHAR(50), -- 'revenue', 'conversion', 'engagement'
+    entity_type VARCHAR(50), -- 'order', 'subscription', 'membership'
+    entity_id VARCHAR(255),
+    properties JSON, -- Event-specific data
+    revenue_cents BIGINT DEFAULT 0,
+    currency VARCHAR(3),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- User Cohorts (Optional - for cohort analysis)
+CREATE TABLE IF NOT EXISTS user_cohorts (
+    id VARCHAR(255) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    cohort_month DATE NOT NULL, -- First day of the month when user first made a purchase
+    cohort_type VARCHAR(50) NOT NULL, -- 'first_purchase', 'first_subscription'
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_user_cohort (user_id, cohort_type)
+);
+
+-- Analytics Indexes
+CREATE INDEX idx_analytics_snapshots_date_type ON analytics_snapshots(snapshot_date, metric_type);
+CREATE INDEX idx_analytics_snapshots_currency ON analytics_snapshots(currency);
+CREATE INDEX idx_analytics_events_user_id ON analytics_events(user_id);
+CREATE INDEX idx_analytics_events_type ON analytics_events(event_type);
+CREATE INDEX idx_analytics_events_category ON analytics_events(event_category);
+CREATE INDEX idx_user_cohorts_month ON user_cohorts(cohort_month);
+CREATE INDEX idx_user_cohorts_type ON user_cohorts(cohort_type);

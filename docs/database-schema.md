@@ -15,7 +15,7 @@ CREATE TABLE users (
     user_type VARCHAR(255) NOT NULL, -- 'individual', 'business', 'admin'
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
-    password_hash TEXT,    
+    password_hash TEXT,
     recovery_email VARCHAR(255),
     phone VARCHAR(50),
     is_verified BOOLEAN NOT NULL DEFAULT false,
@@ -173,6 +173,7 @@ CREATE TABLE payment_methods (
     billing_address_id VARCHAR(255),
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest payment method
     guest_email VARCHAR(255), -- Email for guest payment methods (for identification)
+    guest_name VARCHAR(255), -- Name for guest payment methods
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -319,33 +320,169 @@ CREATE TABLE payments (
 );
 ```
 
-### Subscriptions
+### Subscriptions (Enhanced with Guest Support, Flexible Products & Automatic Billing)
 
 ```sql
 CREATE TABLE subscriptions (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    product_id VARCHAR(255) NOT NULL,
+    customer_id VARCHAR(255) NOT NULL, -- References provider_customers table (supports both users and guests)
+    product_id VARCHAR(255), -- Optional for custom donations/flexible subscriptions
     payment_method_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_subscription_id VARCHAR(255),
-    status VARCHAR(50) NOT NULL, -- 'active', 'cancelled', 'past_due', 'trialing'
+    status VARCHAR(50) NOT NULL, -- 'active', 'cancelled', 'past_due', 'trialing', 'incomplete', 'incomplete_expired'
     current_period_start TIMESTAMP NOT NULL,
     current_period_end TIMESTAMP NOT NULL,
     cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
     trial_end TIMESTAMP,
     price_cents BIGINT NOT NULL,
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    -- Billing automation fields
+    billing_interval VARCHAR(20) NOT NULL DEFAULT 'monthly', -- 'daily', 'weekly', 'monthly', 'yearly'
+    interval_multiplier INTEGER DEFAULT 1, -- Optional: 2 for every 2 months, 3 for every 3 weeks, etc.
+    next_billing_date TIMESTAMP, -- When the next billing should occur
+    last_billing_attempt TIMESTAMP, -- Last time we attempted to bill this subscription
+    billing_retry_count INTEGER NOT NULL DEFAULT 0, -- Number of failed billing attempts
+    max_retry_attempts INTEGER NOT NULL DEFAULT 3, -- Maximum retry attempts before suspension
+    billing_status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'past_due', 'suspended', 'cancelled'
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL), -- Must belong to a user, organization, or have a customer
+    CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly')),
+    CHECK (interval_multiplier IS NULL OR (interval_multiplier > 0 AND interval_multiplier <= 12)),
+    CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled'))
+);
+```
+
+**Key Features:**
+- **Guest Support**: `customer_id` field enables subscriptions for guests without user accounts
+- **Flexible Products**: `product_id` is optional for custom donations and flexible subscriptions
+- **Multipurpose Design**: Supports both predefined products and custom pricing
+- **Unified Customer Management**: Links to `provider_customers` table for both users and guests
+- **Enhanced Status**: Additional status values for incomplete payments
+- **Flexible Ownership**: Can belong to users, organizations, or guests
+- **Provider Agnostic**: Works with any payment provider
+- **Clean Design**: No duplicate guest fields - guest info comes from `provider_customers`
+- **Automatic Billing**: Built-in support for automatic subscription renewals with flexible intervals
+- **Retry Logic**: Configurable retry attempts for failed billing with status tracking
+- **Flexible Intervals**: Support for custom billing frequencies using interval multipliers
+
+#### Billing Automation Features
+
+**Billing Intervals with Multipliers:**
+- `billing_interval`: Base interval ('daily', 'weekly', 'monthly', 'yearly')
+- `interval_multiplier`: Optional multiplier for custom frequencies (1-12)
+
+**Common Billing Configurations:**
+- **Weekly**: `billing_interval = 'weekly'`, `interval_multiplier = 1`
+- **Biweekly**: `billing_interval = 'weekly'`, `interval_multiplier = 2`
+- **Monthly**: `billing_interval = 'monthly'`, `interval_multiplier = 1`
+- **Quarterly**: `billing_interval = 'monthly'`, `interval_multiplier = 3`
+- **Bimonthly**: `billing_interval = 'monthly'`, `interval_multiplier = 2`
+- **Semiannually**: `billing_interval = 'monthly'`, `interval_multiplier = 6`
+- **Yearly**: `billing_interval = 'yearly'`, `interval_multiplier = 1`
+
+**Billing Status Management:**
+- `active`: Normal billing cycle
+- `past_due`: Payment failed, retry scheduled
+- `suspended`: Max retries reached, billing stopped
+- `cancelled`: Subscription cancelled by user/admin
+
+**Retry Logic:**
+- `billing_retry_count`: Tracks failed attempts
+- `max_retry_attempts`: Configurable retry limit (default: 3)
+- `last_billing_attempt`: Timestamp of last billing attempt
+
+#### Subscription Use Cases
+
+**1. Traditional Product Subscriptions** (with `product_id`)
+```sql
+-- Monthly premium plan subscription
+INSERT INTO subscriptions (
+    customer_id, product_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date
+) VALUES (
+    'cust_123', 'prod_premium_monthly', 2999, 'USD',
+    'monthly', 1, '2024-02-15 00:00:00'
+);
+```
+
+**2. Custom Donation Subscriptions** (without `product_id`)
+```sql
+-- Monthly donation of $25
+INSERT INTO subscriptions (
+    customer_id, product_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date, metadata
+) VALUES (
+    'cust_456', NULL, 2500, 'USD',
+    'monthly', 1, '2024-02-15 00:00:00',
+    '{"type": "monthly_donation", "cause": "animal_shelter"}'
+);
+```
+
+**3. Flexible Service Subscriptions** (without `product_id`)
+```sql
+-- Custom consulting service - $150 every 2 weeks
+INSERT INTO subscriptions (
+    customer_id, product_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date, metadata
+) VALUES (
+    'cust_789', NULL, 15000, 'USD',
+    'weekly', 2, '2024-02-15 00:00:00',
+    '{"type": "consulting", "hours_included": 2, "service": "web_development"}'
+);
+```
+
+**4. Guest Donation Subscriptions**
+```sql
+-- Guest quarterly donation ($30 every 3 months)
+INSERT INTO subscriptions (
+    customer_id, product_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date, metadata
+) VALUES (
+    'cust_guest_012', NULL, 3000, 'USD',
+    'monthly', 3, '2024-05-15 00:00:00',
+    '{"type": "guest_donation", "anonymous": true, "frequency": "quarterly"}'
+);
+```
+
+**5. Advanced Billing Examples**
+```sql
+-- Biweekly subscription (every 2 weeks)
+INSERT INTO subscriptions (
+    customer_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date
+) VALUES (
+    'cust_biweekly', 1999, 'USD',
+    'weekly', 2, '2024-02-15 00:00:00'
+);
+
+-- Semiannual subscription (every 6 months)
+INSERT INTO subscriptions (
+    customer_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date
+) VALUES (
+    'cust_semiannual', 29999, 'USD',
+    'monthly', 6, '2024-08-15 00:00:00'
+);
+
+-- Custom frequency: Every 5 weeks
+INSERT INTO subscriptions (
+    customer_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date, metadata
+) VALUES (
+    'cust_custom', 4999, 'USD',
+    'weekly', 5, '2024-03-21 00:00:00',
+    '{"type": "custom_frequency", "description": "Every 5 weeks special plan"}'
 );
 ```
 
@@ -465,19 +602,24 @@ CREATE TABLE user_memberships (
 ### Entity Relationship Overview
 
 1. **Users & Organizations**: Many-to-many relationship through `organization_users`
-2. **Addresses**: Belong to either users or organizations
-3. **Payment Methods**: Linked to users/organizations and addresses
-4. **Orders**: Reference billing and shipping addresses
-5. **Memberships**: Tied to users and can be linked to subscriptions or orders
-6. **Products**: Organized in categories with support for variations
+2. **Provider Customers**: Unified customer management for users, organizations, and guests
+3. **Addresses**: Belong to users, organizations, or guests (via `is_guest` flag)
+4. **Payment Methods**: Linked to users/organizations/guests and addresses
+5. **Subscriptions**: Connected to customers via `customer_id` (supports guests seamlessly)
+6. **Orders**: Reference billing and shipping addresses
+7. **Memberships**: Tied to users and can be linked to subscriptions or orders
+8. **Products**: Organized in categories with support for variations
 
 ### Key Design Principles
 
-1. **Multi-tenancy**: Support for both individual users and organizations
-2. **Provider Agnostic**: Works with multiple payment providers
-3. **Flexible Pricing**: Supports various business models
-4. **Audit Trail**: Comprehensive event and webhook logging
-5. **Data Integrity**: Proper foreign key constraints and checks
+1. **Multi-tenancy**: Support for individual users, organizations, and guests
+2. **Guest-Friendly**: Complete guest checkout and subscription support without requiring accounts
+3. **Provider Agnostic**: Works with multiple payment providers (Stripe, PayPal, Authorize.net)
+4. **Unified Customer Management**: Single `provider_customers` table handles all customer types
+5. **Flexible Pricing**: Supports various business models (SaaS, eCommerce, memberships)
+6. **Audit Trail**: Comprehensive event and webhook logging
+7. **Data Integrity**: Proper foreign key constraints and optimized CHECK constraints
+8. **Performance Optimized**: Efficient indexes and normalized design
 
 ## Performance Considerations
 
@@ -507,6 +649,14 @@ CREATE INDEX idx_payments_order_id ON payments(order_id);
 -- Subscription management
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX idx_subscriptions_organization_id ON subscriptions(organization_id);
+CREATE INDEX idx_subscriptions_customer_id ON subscriptions(customer_id);
+CREATE INDEX idx_subscriptions_provider_id ON subscriptions(provider_id);
+
+-- Billing automation indexes
+CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date, billing_status);
+CREATE INDEX idx_subscriptions_billing_status ON subscriptions(billing_status);
+CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attempt, billing_retry_count);
 
 -- Membership lookups
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
@@ -597,3 +747,78 @@ CREATE TABLE user_cohorts (
 - Cohort analysis for customer retention
 - Multiple cohort types for different analyses
 - Automatic customer segmentation
+
+## Guest Support Architecture
+
+### Overview
+
+The payment system provides comprehensive guest support, allowing users to make purchases and subscribe to services without creating accounts. This is achieved through a unified customer management approach.
+
+### Guest Customer Flow
+
+1. **Guest Checkout**: Guest provides email and basic info
+2. **Customer Creation**: Record created in `provider_customers` with `is_guest = true`
+3. **Payment Processing**: Normal payment flow using guest customer
+4. **Subscription Support**: Guests can subscribe to recurring services
+5. **Guest Conversion**: When guest registers, all data is seamlessly transferred
+
+### Key Tables for Guest Support
+
+#### Provider Customers (Unified Customer Management)
+```sql
+-- Handles both authenticated users and guests
+SELECT * FROM provider_customers WHERE is_guest = true;
+```
+
+#### Guest Subscriptions
+```sql
+-- Get all guest subscriptions with customer info
+SELECT
+  s.*,
+  c.guest_email,
+  c.guest_name
+FROM subscriptions s
+JOIN provider_customers c ON s.customer_id = c.id
+WHERE c.is_guest = true;
+```
+
+#### Guest Payment Methods
+```sql
+-- Get saved payment methods for guests
+SELECT
+  pm.*,
+  c.guest_email
+FROM payment_methods pm
+JOIN provider_customers c ON pm.guest_email = c.guest_email
+WHERE pm.is_guest = true;
+```
+
+### Guest to User Conversion
+
+When a guest creates an account:
+
+1. **Update Customer Record**: Convert `is_guest = false`, add `user_id`
+2. **Update Subscriptions**: Link to `user_id`
+3. **Update Payment Methods**: Convert guest payment methods
+4. **Maintain History**: All transaction history is preserved
+
+```sql
+-- Example conversion process
+UPDATE provider_customers
+SET is_guest = false, user_id = 'new_user_123', guest_email = NULL
+WHERE guest_email = 'guest@example.com' AND is_guest = true;
+
+UPDATE subscriptions
+SET user_id = 'new_user_123'
+WHERE customer_id IN (
+  SELECT id FROM provider_customers WHERE user_id = 'new_user_123'
+);
+```
+
+### Benefits of This Architecture
+
+1. **Seamless Experience**: Guests can use all features without accounts
+2. **Easy Conversion**: Simple process to convert guests to users
+3. **Data Integrity**: No data loss during conversion
+4. **Performance**: Efficient queries with proper indexing
+5. **Flexibility**: Supports any business model requiring guest checkout

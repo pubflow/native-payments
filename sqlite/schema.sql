@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     billing_address_id TEXT,
     is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest payment method (0 = false, 1 = true)
     guest_email TEXT, -- Email for guest payment methods (for identification)
+    guest_name TEXT, -- Name for guest payment methods
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -278,31 +279,44 @@ CREATE TABLE IF NOT EXISTS order_items (
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
 );
 
--- Subscriptions
+-- Subscriptions (Enhanced with guest support via customer_id and automatic billing)
 CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
-    product_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL, -- References provider_customers table (supports both users and guests)
+    product_id TEXT, -- Optional for custom donations/flexible subscriptions
     payment_method_id TEXT,
     provider_id TEXT NOT NULL,
     provider_subscription_id TEXT,
-    status TEXT NOT NULL, -- 'active', 'cancelled', 'past_due', 'trialing'
+    status TEXT NOT NULL, -- 'active', 'cancelled', 'past_due', 'trialing', 'incomplete', 'incomplete_expired'
     current_period_start TEXT NOT NULL,
     current_period_end TEXT NOT NULL,
     cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
     trial_end TEXT,
     price_cents INTEGER NOT NULL,
     currency TEXT NOT NULL DEFAULT 'USD',
+    -- Billing automation fields
+    billing_interval TEXT NOT NULL DEFAULT 'monthly', -- 'daily', 'weekly', 'monthly', 'yearly'
+    interval_multiplier INTEGER DEFAULT 1, -- Optional: 2 for every 2 months, 3 for every 3 weeks, etc.
+    next_billing_date TEXT, -- When the next billing should occur (ISO 8601 format)
+    last_billing_attempt TEXT, -- Last time we attempted to bill this subscription (ISO 8601 format)
+    billing_retry_count INTEGER NOT NULL DEFAULT 0, -- Number of failed billing attempts
+    max_retry_attempts INTEGER NOT NULL DEFAULT 3, -- Maximum retry attempts before suspension
+    billing_status TEXT NOT NULL DEFAULT 'active', -- 'active', 'past_due', 'suspended', 'cancelled'
     metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL), -- Must belong to a user, organization, or have a customer
+    CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly')),
+    CHECK (interval_multiplier IS NULL OR (interval_multiplier > 0 AND interval_multiplier <= 12)),
+    CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled'))
 );
 
 -- Trigger for updated_at on subscriptions
@@ -479,6 +493,9 @@ CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_organization_id ON subscriptions(organization_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date, billing_status);
+CREATE INDEX idx_subscriptions_billing_status ON subscriptions(billing_status);
+CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attempt, billing_retry_count);
 CREATE INDEX idx_payments_order_id ON payments(order_id);
 CREATE INDEX idx_payments_subscription_id ON payments(subscription_id);
 CREATE INDEX idx_payments_status ON payments(status);

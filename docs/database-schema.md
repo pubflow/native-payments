@@ -15,8 +15,7 @@ CREATE TABLE users (
     user_type VARCHAR(255) NOT NULL, -- 'individual', 'business', 'admin'
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
-    password_hash TEXT,
-    salt VARCHAR(255),
+    password_hash TEXT,    
     recovery_email VARCHAR(255),
     phone VARCHAR(50),
     is_verified BOOLEAN NOT NULL DEFAULT false,
@@ -83,19 +82,26 @@ CREATE TABLE addresses (
     country VARCHAR(2) NOT NULL, -- ISO 2-letter country code
     phone VARCHAR(50),
     email VARCHAR(255),
+    is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest address
+    guest_email VARCHAR(255), -- Email for guest addresses (for identification)
+    guest_name VARCHAR(255), -- Name for guest addresses
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
 ```
 
 **Key Features:**
 - Supports both billing and shipping addresses
-- Can belong to users or organizations
+- Can belong to users, organizations, or guests
 - ISO country code standardization
 - Default address selection
+- `is_guest`: Boolean flag to identify guest addresses
+- `guest_email`: Email for guest address identification and management
+- `guest_name`: Display name for guest addresses
+- Modified CHECK constraint to allow guest addresses without user_id or organization_id
 
 ## Payment Provider Integration
 
@@ -129,6 +135,9 @@ CREATE TABLE provider_customers (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_customer_id VARCHAR(255) NOT NULL, -- ID from the provider (e.g., Stripe customer ID)
+    guest_email VARCHAR(255), -- Email for guest customers
+    guest_name VARCHAR(255), -- Name for guest customers
+    is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest customer
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -136,9 +145,15 @@ CREATE TABLE provider_customers (
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
     UNIQUE KEY (provider_id, provider_customer_id),
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
 ```
+
+**Key Features:**
+- `guest_email`: Email address for guest customers who don't have user accounts
+- `guest_name`: Display name for guest customers
+- `is_guest`: Boolean flag to identify guest customers
+- Modified CHECK constraint to allow guest customers without user_id or organization_id
 
 ### Payment Methods
 
@@ -156,13 +171,15 @@ CREATE TABLE payment_methods (
     card_brand VARCHAR(50), -- 'visa', 'mastercard', etc.
     is_default BOOLEAN NOT NULL DEFAULT false,
     billing_address_id VARCHAR(255),
+    is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest payment method
+    guest_email VARCHAR(255), -- Email for guest payment methods (for identification)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
 ```
 
@@ -170,6 +187,9 @@ CREATE TABLE payment_methods (
 - Links to addresses table for billing information
 - Supports multiple payment types (cards, bank accounts, digital wallets)
 - Provider-agnostic design with provider-specific IDs
+- `is_guest`: Boolean flag to identify guest payment methods
+- `guest_email`: Email for guest payment method identification and management
+- Modified CHECK constraint to allow guest payment methods without user_id or organization_id
 
 ## Transaction Tables
 

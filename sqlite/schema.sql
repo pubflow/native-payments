@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS users (
     picture TEXT,
     user_name TEXT UNIQUE,
     password_hash TEXT,
-    salt TEXT,
     recovery_email TEXT,
     phone TEXT,
     is_verified INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true
@@ -77,23 +76,25 @@ CREATE TABLE IF NOT EXISTS addresses (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
-    type TEXT NOT NULL, -- 'billing', 'shipping'
-    first_name TEXT,
-    last_name TEXT,
-    company TEXT,
-    address_line_1 TEXT NOT NULL,
-    address_line_2 TEXT,
+    address_type TEXT NOT NULL, -- 'billing', 'shipping', 'both'
+    is_default INTEGER NOT NULL DEFAULT 0,
+    name TEXT,
+    line1 TEXT NOT NULL,
+    line2 TEXT,
     city TEXT NOT NULL,
     state TEXT,
     postal_code TEXT NOT NULL,
-    country TEXT NOT NULL,
+    country TEXT NOT NULL, -- ISO 2-letter country code
     phone TEXT,
-    is_default INTEGER NOT NULL DEFAULT 0,
+    email TEXT,
+    is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest address (0 = false, 1 = true)
+    guest_email TEXT, -- Email for guest addresses (for identification)
+    guest_name TEXT, -- Name for guest addresses
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
 );
 
 -- Trigger for updated_at on addresses
@@ -130,6 +131,9 @@ CREATE TABLE IF NOT EXISTS provider_customers (
     organization_id TEXT,
     provider_id TEXT NOT NULL,
     provider_customer_id TEXT NOT NULL, -- ID from the provider (e.g., Stripe customer ID)
+    guest_email TEXT, -- Email for guest customers
+    guest_name TEXT, -- Name for guest customers
+    is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest customer (0 = false, 1 = true)
     metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -137,7 +141,7 @@ CREATE TABLE IF NOT EXISTS provider_customers (
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
     UNIQUE (provider_id, provider_customer_id),
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
 );
 
 -- Trigger for updated_at on provider_customers
@@ -161,13 +165,15 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     card_brand TEXT, -- 'visa', 'mastercard', etc.
     is_default INTEGER NOT NULL DEFAULT 0,
     billing_address_id TEXT,
+    is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest payment method (0 = false, 1 = true)
+    guest_email TEXT, -- Email for guest payment methods (for identification)
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
 );
 
 -- Trigger for updated_at on payment_methods
@@ -306,20 +312,26 @@ BEGIN
     UPDATE subscriptions SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- Payments
+-- Payments (Enhanced with guest checkout support and payment intent functionality)
 CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY,
     order_id TEXT,
     subscription_id TEXT,
-    user_id TEXT,
+    user_id TEXT, -- Made optional for guest checkout
     organization_id TEXT,
     payment_method_id TEXT,
     provider_id TEXT NOT NULL,
-    provider_payment_id TEXT,
+    provider_payment_id TEXT, -- Final payment ID from provider
+    provider_intent_id TEXT, -- Intent ID from provider (e.g., Stripe payment intent)
+    client_secret TEXT, -- Client secret for frontend confirmation
     amount_cents INTEGER NOT NULL,
     currency TEXT NOT NULL DEFAULT 'USD',
-    status TEXT NOT NULL, -- 'pending', 'completed', 'failed', 'refunded'
+    status TEXT NOT NULL, -- 'pending', 'requires_confirmation', 'requires_action', 'processing', 'succeeded', 'failed', 'refunded'
+    description TEXT,
     error_message TEXT,
+    is_guest_payment INTEGER NOT NULL DEFAULT 0, -- Track if this was a guest payment (0 = false, 1 = true)
+    guest_data TEXT, -- JSON string with guest information (email, name, phone, etc.)
+    guest_email TEXT, -- Extracted guest email for indexing and queries
     metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -330,7 +342,7 @@ CREATE TABLE IF NOT EXISTS payments (
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (order_id IS NOT NULL OR subscription_id IS NOT NULL) -- Must be associated with either an order or subscription
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest_payment = 1) -- Must belong to a user, organization, or be guest payment
 );
 
 -- Trigger for updated_at on payments
@@ -449,11 +461,18 @@ END;
 -- Indexes for performance
 CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
-CREATE INDEX idx_addresses_type ON addresses(type);
+CREATE INDEX idx_addresses_address_type ON addresses(address_type);
+CREATE INDEX idx_addresses_is_guest ON addresses(is_guest);
+CREATE INDEX idx_addresses_guest_email ON addresses(guest_email);
+CREATE INDEX idx_addresses_is_default ON addresses(is_default);
 CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
 CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
+CREATE INDEX idx_provider_customers_is_guest ON provider_customers(is_guest);
+CREATE INDEX idx_provider_customers_guest_email ON provider_customers(guest_email);
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
+CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
+CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_organization_id ON orders(organization_id);
 CREATE INDEX idx_orders_status ON orders(status);
@@ -463,6 +482,11 @@ CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_payments_order_id ON payments(order_id);
 CREATE INDEX idx_payments_subscription_id ON payments(subscription_id);
 CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_payments_user_id ON payments(user_id);
+CREATE INDEX idx_payments_organization_id ON payments(organization_id);
+CREATE INDEX idx_payments_provider_intent_id ON payments(provider_intent_id);
+CREATE INDEX idx_payments_is_guest_payment ON payments(is_guest_payment);
+CREATE INDEX idx_payments_guest_email ON payments(guest_email);
 CREATE INDEX idx_invoices_order_id ON invoices(order_id);
 CREATE INDEX idx_invoices_subscription_id ON invoices(subscription_id);
 CREATE INDEX idx_invoices_status ON invoices(status);
@@ -472,9 +496,6 @@ CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_t
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
 CREATE INDEX idx_user_memberships_status ON user_memberships(status);
 CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
-CREATE INDEX idx_addresses_user_id ON addresses(user_id);
-CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
-CREATE INDEX idx_addresses_type ON addresses(type);
 
 -- Analytics Tables (Optional Feature)
 -- These tables can be added to enable advanced analytics and reporting

@@ -1,0 +1,1251 @@
+{
+  "users": {
+    "name": "users",
+    "description": "Users Table (Enhanced)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the user."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "User's first name."
+      },
+      {
+        "name": "lastName",
+        "type": "string",
+        "required": true,
+        "description": "User's last name."
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "required": true,
+        "unique": true,
+        "description": "User's email address."
+      },
+      {
+        "name": "userType",
+        "type": "string",
+        "required": true,
+        "validation": ["options(individual,business,admin)"],
+        "description": "Type of user (e.g., 'individual', 'business', 'admin')."
+      },
+      {
+        "name": "picture",
+        "type": "string",
+        "description": "URL to user's profile picture."
+      },
+      {
+        "name": "userName",
+        "type": "string",
+        "unique": true,
+        "description": "User's unique username."
+      },
+      {
+        "name": "passwordHash",
+        "type": "string",
+        "description": "Hashed password for the user."
+      },
+      {
+        "name": "recoveryEmail",
+        "type": "string",
+        "description": "User's recovery email address."
+      },
+      {
+        "name": "phone",
+        "type": "string",
+        "description": "User's phone number."
+      },
+      {
+        "name": "isVerified",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the user's email is verified (0=false, 1=true)."
+      },
+      {
+        "name": "isLocked",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the user's account is locked (0=false, 1=true)."
+      },
+      {
+        "name": "twoFactor",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if 2FA is enabled for the user (0=false, 1=true)."
+      },
+      {
+        "name": "passkeys",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for multiple passkeys."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional user information."
+      },
+      {
+        "name": "firstTime",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": true,
+        "description": "Indicates if it's the user's first time (0=false, 1=true)."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_users_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_users_email_unique", "fields": ["email"], "unique": true},
+      {"name": "idx_users_user_name_unique", "fields": ["userName"], "unique": true}
+    ],
+    "checks": {
+      "create": ["admin"],
+      "read": ["admin"],
+      "update": ["admin"],
+      "delete": ["admin"],
+      "search": ["admin"]
+    }
+  },
+  "paymentProviders": {
+    "name": "paymentProviders",
+    "description": "Payment Providers Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the payment provider (e.g., 'stripe', 'paypal')."
+      },
+      {
+        "name": "displayName",
+        "type": "string",
+        "required": true,
+        "description": "Display name of the payment provider."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "Description of the payment provider."
+      },
+      {
+        "name": "picture",
+        "type": "string",
+        "description": "URL to payment provider logo or icon."
+      },
+      {
+        "name": "isActive",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": true,
+        "description": "Indicates if the payment provider is active."
+      },
+      {
+        "name": "supportsSubscriptions",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the provider supports subscriptions."
+      },
+      {
+        "name": "supportsSavedMethods",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the provider supports saved payment methods."
+      },
+      {
+        "name": "config",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for provider-specific configuration."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_payment_providers_id_pk", "fields": ["id"], "unique": true}
+    ],
+    "checks": {
+      "create": ["admin"],
+      "read": ["admin", "public"],
+      "update": ["admin"],
+      "delete": ["admin"],
+      "search": ["admin", "public"]
+    }
+  },
+  "paymentEvents": {
+    "name": "paymentEvents",
+    "description": "Payment Events Table (Internal application events)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the payment event."
+      },
+      {
+        "name": "entityType",
+        "type": "string",
+        "required": true,
+        "description": "Type of entity this event relates to (e.g., 'payment', 'subscription', 'order')."
+      },
+      {
+        "name": "entityId",
+        "type": "string",
+        "required": true,
+        "description": "ID of the entity this event relates to."
+      },
+      {
+        "name": "eventType",
+        "type": "string",
+        "required": true,
+        "description": "Type of event (e.g., 'created', 'updated', 'failed')."
+      },
+      {
+        "name": "data",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string containing data relevant to the event."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_payment_events_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_payment_events_entity", "fields": ["entityType", "entityId"]},
+      {"name": "idx_payment_events_event_type", "fields": ["eventType"]}
+    ],
+    "checks": {
+      "create": ["system", "admin"],
+      "read": ["admin"],
+      "update": ["system", "admin"],
+      "delete": ["admin"],
+      "search": ["admin"]
+    }
+  },
+  "organizations": {
+    "name": "organizations",
+    "description": "Organizations Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the organization."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the organization."
+      },
+      {
+        "name": "ownerUserId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the user who owns the organization."
+      },
+      {
+        "name": "businessEmail",
+        "type": "string",
+        "description": "Business email of the organization."
+      },
+      {
+        "name": "businessPhone",
+        "type": "string",
+        "description": "Business phone number of the organization."
+      },
+      {
+        "name": "taxId",
+        "type": "string",
+        "description": "Tax ID of the organization."
+      },
+      {
+        "name": "address",
+        "type": "string",
+        "format": "text",
+        "description": "Physical address of the organization."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_organizations_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_organizations_owner_user_id", "fields": ["ownerUserId"]}
+    ],
+    "checks": {
+      "create": ["admin", "self(owner_user_id)"],
+      "read": ["admin", "self(owner_user_id)", "member"],
+      "update": ["admin", "self(owner_user_id)"],
+      "delete": ["admin", "self(owner_user_id)"],
+      "search": ["admin", "member"]
+    }
+  },
+  "paymentWebhooks": {
+    "name": "paymentWebhooks",
+    "description": "Payment Webhooks Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the payment webhook event."
+      },
+      {
+        "name": "providerId",
+        "type": "reference",
+        "references": {"record": "paymentProviders", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the payment provider."
+      },
+      {
+        "name": "eventType",
+        "type": "string",
+        "required": true,
+        "description": "Type of event from the provider (e.g., 'payment.succeeded', 'subscription.created')."
+      },
+      {
+        "name": "payload",
+        "type": "string",
+        "format": "json",
+        "required": true,
+        "description": "JSON string containing the full event payload from the provider."
+      },
+      {
+        "name": "processed",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the webhook event has been processed."
+      },
+      {
+        "name": "processedAt",
+        "type": "date",
+        "description": "Timestamp of when the webhook event was processed."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_payment_webhooks_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_payment_webhooks_provider_id", "fields": ["providerId"]},
+      {"name": "idx_payment_webhooks_event_type", "fields": ["eventType"]},
+      {"name": "idx_payment_webhooks_processed", "fields": ["processed"]}
+    ],
+    "checks": {
+      "create": ["system", "admin"],
+      "read": ["admin"],
+      "update": ["system", "admin"],
+      "delete": ["admin"],
+      "search": ["admin"]
+    }
+  },
+  "productCategories": {
+    "name": "productCategories",
+    "description": "Product Categories Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the product category."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the product category."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "format": "text",
+        "description": "Description of the product category."
+      },
+      {
+        "name": "image",
+        "type": "string",
+        "description": "Category image URL."
+      },
+      {
+        "name": "isActive",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": true,
+        "description": "Indicates if the category is active."
+      },
+      {
+        "name": "sortOrder",
+        "type": "number",
+        "required": true,
+        "defaultValue": 0,
+        "description": "Sort order for displaying categories."
+      },
+      {
+        "name": "parentId",
+        "type": "string",
+        "description": "Foreign key referencing the parent category for subcategories. (FK constraint managed by backend)"
+      }
+    ],
+    "indexes": [
+      {"name": "idx_product_categories_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_product_categories_parent_id", "fields": ["parentId"]}
+    ],
+    "checks": {
+      "create": ["admin"],
+      "read": ["admin", "public"],
+      "update": ["admin"],
+      "delete": ["admin"],
+      "search": ["admin", "public"]
+    }
+  },
+  "products": {
+    "name": "products",
+    "description": "Products/Plans Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the product."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "required": true,
+        "description": "Name of the product."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "format": "text",
+        "description": "Description of the product."
+      },
+      {
+        "name": "productType",
+        "type": "string",
+        "required": true,
+        "validation": ["options(physical,digital,service,subscription)"],
+        "description": "Type of product."
+      },
+      {
+        "name": "isRecurring",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the product is recurring."
+      },
+      {
+        "name": "priceCents",
+        "type": "number",
+        "required": true,
+        "description": "Price in cents."
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "defaultValue": "USD",
+        "description": "Currency code (e.g., USD)."
+      },
+      {
+        "name": "billingInterval",
+        "type": "string",
+        "validation": ["options(monthly,yearly)"],
+        "description": "Billing interval for recurring products (null for one-time)."
+      },
+      {
+        "name": "trialDays",
+        "type": "number",
+        "defaultValue": 0,
+        "description": "Number of trial days for recurring products."
+      },
+      {
+        "name": "image",
+        "type": "string",
+        "description": "Main product image URL."
+      },
+      {
+        "name": "gallery",
+        "type": "string",
+        "format": "json",
+        "description": "JSON array of additional image URLs."
+      },
+      {
+        "name": "categoryId",
+        "type": "reference",
+        "references": {"record": "productCategories", "field": "id"},
+        "description": "Foreign key referencing the product category."
+      },
+      {
+        "name": "variations",
+        "type": "string",
+        "format": "json",
+        "description": "JSON array of variation options (e.g., size, color)."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional product information."
+      },
+      {
+        "name": "isActive",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": true,
+        "description": "Indicates if the product is active."
+      },
+      {
+        "name": "parentProductId",
+        "type": "string",
+        "description": "For product variations, references the parent product. (FK constraint managed by backend)"
+      }
+    ],
+    "indexes": [
+      {"name": "idx_products_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_products_category_id", "fields": ["categoryId"]},
+      {"name": "idx_products_parent_product_id", "fields": ["parentProductId"]}
+    ],
+    "checks": {
+      "create": ["admin"],
+      "read": ["admin", "public"],
+      "update": ["admin"],
+      "delete": ["admin"],
+      "search": ["admin", "public"]
+    }
+  },
+  "addresses": {
+    "name": "addresses",
+    "description": "Addresses Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the address."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "addressType",
+        "type": "string",
+        "required": true,
+        "validation": ["options(billing,shipping,both)"],
+        "description": "Type of address (e.g., 'billing', 'shipping', 'both')."
+      },
+      {
+        "name": "isDefault",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this is the default address."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Name associated with the address (e.g., recipient name)."
+      },
+      {
+        "name": "line1",
+        "type": "string",
+        "required": true,
+        "description": "First line of the address."
+      },
+      {
+        "name": "line2",
+        "type": "string",
+        "description": "Second line of the address."
+      },
+      {
+        "name": "city",
+        "type": "string",
+        "required": true,
+        "description": "City."
+      },
+      {
+        "name": "state",
+        "type": "string",
+        "description": "State or province."
+      },
+      {
+        "name": "postalCode",
+        "type": "string",
+        "required": true,
+        "description": "Postal or ZIP code."
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "required": true,
+        "description": "Country (ISO 2-letter country code)."
+      },
+      {
+        "name": "phone",
+        "type": "string",
+        "description": "Phone number associated with the address."
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "description": "Email address associated with the address."
+      },
+      {
+        "name": "isGuest",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this is a guest address (0 = false, 1 = true)."
+      },
+      {
+        "name": "guestEmail",
+        "type": "string",
+        "description": "Email for guest addresses (for identification)."
+      },
+      {
+        "name": "guestName",
+        "type": "string",
+        "description": "Name for guest addresses."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_addresses_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_addresses_user_id", "fields": ["userId"]},
+      {"name": "idx_addresses_organization_id", "fields": ["organizationId"]}
+    ],
+    "checks": {
+      "create": ["admin", "self(user_id)"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "self(user_id)"],
+      "delete": ["admin", "self(user_id)"],
+      "search": ["admin", "self(user_id)"]
+    }
+  },
+  "providerCustomers": {
+    "name": "providerCustomers",
+    "description": "Provider Customers Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the provider customer record."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "providerId",
+        "type": "reference",
+        "references": {"record": "paymentProviders", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the payment provider."
+      },
+      {
+        "name": "providerCustomerId",
+        "type": "string",
+        "required": true,
+        "description": "Customer ID from the payment provider (e.g., Stripe customer ID)."
+      },
+      {
+        "name": "guestEmail",
+        "type": "string",
+        "description": "Email for guest customers."
+      },
+      {
+        "name": "guestName",
+        "type": "string",
+        "description": "Name for guest customers."
+      },
+      {
+        "name": "isGuest",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this is a guest customer (0 = false, 1 = true)."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional metadata."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_provider_customers_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_provider_customers_provider_unique", "fields": ["providerId", "providerCustomerId"], "unique": true},
+      {"name": "idx_provider_customers_user_id", "fields": ["userId"]},
+      {"name": "idx_provider_customers_organization_id", "fields": ["organizationId"]}
+    ],
+    "checks": {
+      "create": ["admin", "system"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "system"],
+      "delete": ["admin"],
+      "search": ["admin"]
+    }
+  },
+  "paymentMethods": {
+    "name": "paymentMethods",
+    "description": "Payment Methods Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the payment method."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "providerId",
+        "type": "reference",
+        "references": {"record": "paymentProviders", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the payment provider."
+      },
+      {
+        "name": "providerPaymentMethodId",
+        "type": "string",
+        "required": true,
+        "description": "Payment method ID from the provider."
+      },
+      {
+        "name": "paymentType",
+        "type": "string",
+        "required": true,
+        "description": "Type of payment method (e.g., 'credit_card', 'bank_account', 'paypal')."
+      },
+      {
+        "name": "lastFour",
+        "type": "string",
+        "description": "Last 4 digits of card or account number."
+      },
+      {
+        "name": "expiryMonth",
+        "type": "string",
+        "description": "Expiration month (for cards)."
+      },
+      {
+        "name": "expiryYear",
+        "type": "string",
+        "description": "Expiration year (for cards)."
+      },
+      {
+        "name": "cardBrand",
+        "type": "string",
+        "description": "Card brand (e.g., 'visa', 'mastercard')."
+      },
+      {
+        "name": "isDefault",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this is the default payment method."
+      },
+      {
+        "name": "billingAddressId",
+        "type": "reference",
+        "references": {"record": "addresses", "field": "id"},
+        "description": "Foreign key referencing the billing address."
+      },
+      {
+        "name": "isGuest",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this is a guest payment method (0 = false, 1 = true)."
+      },
+      {
+        "name": "guestEmail",
+        "type": "string",
+        "description": "Email for guest payment methods (for identification)."
+      },
+      {
+        "name": "guestName",
+        "type": "string",
+        "description": "Name for guest payment methods."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_payment_methods_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_payment_methods_user_id", "fields": ["userId"]},
+      {"name": "idx_payment_methods_organization_id", "fields": ["organizationId"]},
+      {"name": "idx_payment_methods_provider_id", "fields": ["providerId"]},
+      {"name": "idx_payment_methods_billing_address_id", "fields": ["billingAddressId"]}
+    ],
+    "checks": {
+      "create": ["admin", "self(user_id)"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "self(user_id)"],
+      "delete": ["admin", "self(user_id)"],
+      "search": ["admin", "self(user_id)"]
+    }
+  },
+  "orders": {
+    "name": "orders",
+    "description": "Orders Table",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the order."
+      },
+      {
+        "name": "orderNumber",
+        "type": "string",
+        "unique": true,
+        "required": true,
+        "description": "Human-readable order number."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "defaultValue": "pending",
+        "validation": ["options(pending,paid,cancelled,refunded)"],
+        "description": "Status of the order."
+      },
+      {
+        "name": "subtotalCents",
+        "type": "number",
+        "required": true,
+        "description": "Subtotal amount in cents."
+      },
+      {
+        "name": "taxCents",
+        "type": "number",
+        "required": true,
+        "defaultValue": 0,
+        "description": "Tax amount in cents."
+      },
+      {
+        "name": "discountCents",
+        "type": "number",
+        "required": true,
+        "defaultValue": 0,
+        "description": "Discount amount in cents."
+      },
+      {
+        "name": "totalCents",
+        "type": "number",
+        "required": true,
+        "description": "Total amount in cents."
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "defaultValue": "USD",
+        "description": "Currency code (e.g., USD)."
+      },
+      {
+        "name": "billingAddressId",
+        "type": "reference",
+        "references": {"record": "addresses", "field": "id"},
+        "description": "Foreign key referencing the billing address."
+      },
+      {
+        "name": "shippingAddressId",
+        "type": "reference",
+        "references": {"record": "addresses", "field": "id"},
+        "description": "Foreign key referencing the shipping address."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional order information."
+      },
+      {
+        "name": "completedAt",
+        "type": "date",
+        "description": "Timestamp when the order was completed."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_orders_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_orders_order_number_unique", "fields": ["orderNumber"], "unique": true},
+      {"name": "idx_orders_user_id", "fields": ["userId"]},
+      {"name": "idx_orders_organization_id", "fields": ["organizationId"]}
+    ],
+    "checks": {
+      "create": ["admin", "self(user_id)"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "self(user_id)"],
+      "delete": ["admin"],
+      "search": ["admin", "self(user_id)"]
+    }
+  },
+  "subscriptions": {
+    "name": "subscriptions",
+    "description": "Subscriptions Table (Enhanced with guest support via customer_id and automatic billing)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the subscription."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "customerId",
+        "type": "reference",
+        "references": {"record": "providerCustomers", "field": "id"},
+        "required": true,
+        "description": "References provider_customers table (supports both users and guests)."
+      },
+      {
+        "name": "productId",
+        "type": "reference",
+        "references": {"record": "products", "field": "id"},
+        "description": "Optional foreign key referencing the product (for custom donations/flexible subscriptions)."
+      },
+      {
+        "name": "paymentMethodId",
+        "type": "reference",
+        "references": {"record": "paymentMethods", "field": "id"},
+        "description": "Foreign key referencing the payment method."
+      },
+      {
+        "name": "providerId",
+        "type": "reference",
+        "references": {"record": "paymentProviders", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the payment provider."
+      },
+      {
+        "name": "providerSubscriptionId",
+        "type": "string",
+        "description": "Subscription ID from the payment provider."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "validation": ["options(active,cancelled,past_due,trialing,incomplete,incomplete_expired)"],
+        "description": "Status of the subscription."
+      },
+      {
+        "name": "currentPeriodStart",
+        "type": "date",
+        "required": true,
+        "description": "Start date of the current billing period."
+      },
+      {
+        "name": "currentPeriodEnd",
+        "type": "date",
+        "required": true,
+        "description": "End date of the current billing period."
+      },
+      {
+        "name": "cancelAtPeriodEnd",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if the subscription will be cancelled at the end of the current period."
+      },
+      {
+        "name": "trialEnd",
+        "type": "date",
+        "description": "End date of the trial period, if applicable."
+      },
+      {
+        "name": "priceCents",
+        "type": "number",
+        "required": true,
+        "description": "Price of the subscription in cents."
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "defaultValue": "USD",
+        "description": "Currency of the subscription (e.g., 'USD')."
+      },
+      {
+        "name": "billingInterval",
+        "type": "string",
+        "required": true,
+        "defaultValue": "monthly",
+        "validation": ["options(daily,weekly,monthly,yearly)"],
+        "description": "Billing interval for the subscription."
+      },
+      {
+        "name": "intervalMultiplier",
+        "type": "number",
+        "defaultValue": 1,
+        "description": "Multiplier for the billing interval (e.g., 2 for every 2 months)."
+      },
+      {
+        "name": "nextBillingDate",
+        "type": "date",
+        "description": "Date of the next scheduled billing attempt (ISO 8601 format)."
+      },
+      {
+        "name": "lastBillingAttempt",
+        "type": "date",
+        "description": "Timestamp of the last billing attempt (ISO 8601 format)."
+      },
+      {
+        "name": "billingRetryCount",
+        "type": "number",
+        "required": true,
+        "defaultValue": 0,
+        "description": "Number of failed billing attempts."
+      },
+      {
+        "name": "maxRetryAttempts",
+        "type": "number",
+        "required": true,
+        "defaultValue": 3,
+        "description": "Maximum retry attempts before suspension."
+      },
+      {
+        "name": "billingStatus",
+        "type": "string",
+        "required": true,
+        "defaultValue": "active",
+        "validation": ["options(active,past_due,suspended,cancelled)"],
+        "description": "Current billing status of the subscription."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional metadata."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_subscriptions_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_subscriptions_user_id", "fields": ["userId"]},
+      {"name": "idx_subscriptions_organization_id", "fields": ["organizationId"]},
+      {"name": "idx_subscriptions_customer_id", "fields": ["customerId"]},
+      {"name": "idx_subscriptions_product_id", "fields": ["productId"]},
+      {"name": "idx_subscriptions_payment_method_id", "fields": ["paymentMethodId"]},
+      {"name": "idx_subscriptions_provider_id", "fields": ["providerId"]}
+    ],
+    "checks": {
+      "create": ["admin", "self(user_id)", "system"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "self(user_id)", "system"],
+      "delete": ["admin", "system"],
+      "search": ["admin", "self(user_id)"]
+    }
+  },
+  "payments": {
+    "name": "payments",
+    "description": "Payments Table (Enhanced with guest checkout support and payment intent functionality)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "string",
+        "primaryKey": true,
+        "description": "Primary key for the payment."
+      },
+      {
+        "name": "orderId",
+        "type": "reference",
+        "references": {"record": "orders", "field": "id"},
+        "description": "Foreign key referencing the order."
+      },
+      {
+        "name": "subscriptionId",
+        "type": "reference",
+        "references": {"record": "subscriptions", "field": "id"},
+        "description": "Foreign key referencing the subscription."
+      },
+      {
+        "name": "userId",
+        "type": "reference",
+        "references": {"record": "users", "field": "id"},
+        "description": "Foreign key referencing the user (optional for guest checkout)."
+      },
+      {
+        "name": "organizationId",
+        "type": "reference",
+        "references": {"record": "organizations", "field": "id"},
+        "description": "Foreign key referencing the organization."
+      },
+      {
+        "name": "paymentMethodId",
+        "type": "reference",
+        "references": {"record": "paymentMethods", "field": "id"},
+        "description": "Foreign key referencing the payment method."
+      },
+      {
+        "name": "providerId",
+        "type": "reference",
+        "references": {"record": "paymentProviders", "field": "id"},
+        "required": true,
+        "description": "Foreign key referencing the payment provider."
+      },
+      {
+        "name": "providerPaymentId",
+        "type": "string",
+        "description": "Final payment ID from the payment provider."
+      },
+      {
+        "name": "providerIntentId",
+        "type": "string",
+        "description": "Intent ID from the provider (e.g., Stripe payment intent)."
+      },
+      {
+        "name": "clientSecret",
+        "type": "string",
+        "description": "Client secret for frontend confirmation of payment intent."
+      },
+      {
+        "name": "amountCents",
+        "type": "number",
+        "required": true,
+        "description": "Amount of the payment in cents."
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "required": true,
+        "defaultValue": "USD",
+        "description": "Currency of the payment (e.g., 'USD')."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "required": true,
+        "validation": ["options(pending,requires_confirmation,requires_action,processing,succeeded,failed,refunded)"],
+        "description": "Status of the payment."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "Description of the payment."
+      },
+      {
+        "name": "errorMessage",
+        "type": "string",
+        "description": "Error message if the payment failed."
+      },
+      {
+        "name": "concept",
+        "type": "string",
+        "description": "Human-readable concept (e.g., \"Monthly Subscription\", \"Product Purchase\", \"Donation\")."
+      },
+      {
+        "name": "referenceCode",
+        "type": "string",
+        "description": "Machine-readable code for analytics (e.g., \"subscription_monthly\", \"donation_campaign_2024\")."
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "description": "High-level category (e.g., \"subscription\", \"donation\", \"purchase\", \"refund\", \"fee\")."
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Comma-separated tags for flexible categorization (e.g., \"promotion,summer,discount\")."
+      },
+      {
+        "name": "isGuestPayment",
+        "type": "boolean",
+        "required": true,
+        "defaultValue": false,
+        "description": "Indicates if this was a guest payment (0 = false, 1 = true)."
+      },
+      {
+        "name": "guestData",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string with guest information (email, name, phone, etc.)."
+      },
+      {
+        "name": "guestEmail",
+        "type": "string",
+        "description": "Extracted guest email for indexing and queries."
+      },
+      {
+        "name": "metadata",
+        "type": "string",
+        "format": "json",
+        "description": "JSON string for additional metadata."
+      },
+      {
+        "name": "completedAt",
+        "type": "date",
+        "description": "Timestamp when the payment was completed (succeeded or failed definitively)."
+      }
+    ],
+    "indexes": [
+      {"name": "idx_payments_id_pk", "fields": ["id"], "unique": true},
+      {"name": "idx_payments_order_id", "fields": ["orderId"]},
+      {"name": "idx_payments_subscription_id", "fields": ["subscriptionId"]},
+      {"name": "idx_payments_user_id", "fields": ["userId"]},
+      {"name": "idx_payments_organization_id", "fields": ["organizationId"]},
+      {"name": "idx_payments_payment_method_id", "fields": ["paymentMethodId"]},
+      {"name": "idx_payments_provider_id", "fields": ["providerId"]},
+      {"name": "idx_payments_guest_email", "fields": ["guestEmail"]}
+    ],
+    "checks": {
+      "create": ["admin", "system", "self(user_id)"],
+      "read": ["admin", "self(user_id)"],
+      "update": ["admin", "system"],
+      "delete": ["admin"],
+      "search": ["admin", "self(user_id)"]
+    }
+  }
+}

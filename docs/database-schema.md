@@ -20,8 +20,9 @@ CREATE TABLE users (
     phone VARCHAR(50),
     is_verified BOOLEAN NOT NULL DEFAULT false,
     is_locked BOOLEAN NOT NULL DEFAULT false,
-    two_factor JSON, -- JSON object for multiple 2FA methods including encrypted keys
+    two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
     passkeys JSON, -- JSON array for multiple passkeys
+    metadata JSON, -- JSON array for additional user information
     first_time BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -31,8 +32,9 @@ CREATE TABLE users (
 **Key Features:**
 - `is_verified`: Tracks email verification status
 - `is_locked`: Account lock status for security
-- `two_factor`: JSON field for storing 2FA configuration
+- `two_factor`: Boolean flag indicating if 2FA is enabled
 - `passkeys`: JSON array for WebAuthn/passkey support
+- `metadata`: JSON array for additional user information and custom data
 - `first_time`: Flag for first-time user experience
 
 ### Organizations
@@ -111,6 +113,7 @@ CREATE TABLE addresses (
 CREATE TABLE payment_providers (
     id VARCHAR(50) PRIMARY KEY, -- 'stripe', 'paypal', 'authorize_net', etc.
     display_name VARCHAR(255) NOT NULL,
+    description VARCHAR(500), -- Description of the payment provider
     picture VARCHAR(255), -- URL to payment provider logo or icon
     is_active BOOLEAN NOT NULL DEFAULT true,
     supports_subscriptions BOOLEAN NOT NULL DEFAULT false,
@@ -122,6 +125,7 @@ CREATE TABLE payment_providers (
 ```
 
 **Key Features:**
+- `description`: Detailed description of the payment provider
 - `picture`: URL for provider logo/icon display
 - `config`: JSON field for provider-specific settings (API keys, etc.)
 - Feature flags for subscription and saved payment method support
@@ -306,6 +310,11 @@ CREATE TABLE payments (
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     status VARCHAR(50) NOT NULL, -- 'pending', 'completed', 'failed', 'refunded'
     error_message TEXT,
+    -- Enhanced tracking fields
+    concept VARCHAR(100), -- Human-readable concept (e.g., "Monthly Subscription", "Product Purchase", "Donation")
+    reference_code VARCHAR(100), -- Machine-readable code for analytics (e.g., "subscription_monthly", "donation_campaign_2024")
+    category VARCHAR(50), -- High-level category (e.g., "subscription", "donation", "purchase", "refund", "fee")
+    tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount")
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -318,6 +327,30 @@ CREATE TABLE payments (
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
     CHECK (order_id IS NOT NULL OR subscription_id IS NOT NULL) -- Must be associated with either an order or subscription
 );
+```
+
+**Enhanced Tracking Features:**
+- `concept`: Human-readable description for easy identification
+- `reference_code`: Unique machine-readable code for analytics and queries
+- `category`: High-level categorization for reporting
+- `tags`: Flexible comma-separated tags for multi-dimensional analysis
+
+**Usage Examples:**
+```sql
+-- Analyze all promotional payments
+SELECT * FROM payments WHERE reference_code LIKE '%promo%';
+
+-- Get enterprise annual payments
+SELECT * FROM payments WHERE tags LIKE '%enterprise%' AND tags LIKE '%annual%';
+
+-- Revenue by category
+SELECT category, SUM(amount_cents) as total_revenue
+FROM payments
+WHERE status = 'succeeded'
+GROUP BY category;
+
+-- Find specific campaign payments
+SELECT * FROM payments WHERE reference_code = 'donation_campaign_2024';
 ```
 
 ### Subscriptions (Enhanced with Guest Support, Flexible Products & Automatic Billing)
@@ -508,6 +541,7 @@ CREATE TABLE invoices (
     billing_address_id VARCHAR(255),
     provider_id VARCHAR(50),
     provider_invoice_id VARCHAR(255),
+    invoice_url VARCHAR(500), -- Optional friendly URL to access the invoice
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
@@ -645,6 +679,11 @@ CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_payments_status ON payments(status);
 CREATE INDEX idx_payments_order_id ON payments(order_id);
+
+-- Enhanced payment tracking indexes
+CREATE INDEX idx_payments_reference_code ON payments(reference_code);
+CREATE INDEX idx_payments_category ON payments(category);
+CREATE INDEX idx_payments_concept ON payments(concept);
 
 -- Subscription management
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);

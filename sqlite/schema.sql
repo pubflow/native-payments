@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS users (
     phone TEXT,
     is_verified INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true
     is_locked INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true
-    two_factor TEXT, -- JSON string for multiple 2FA methods including encrypted keys
+    two_factor INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true (indicates if 2FA is enabled)
     passkeys TEXT, -- JSON string for multiple passkeys
+    metadata TEXT, -- JSON string for additional user information
     first_time INTEGER NOT NULL DEFAULT 1, -- Boolean: 0=false, 1=true
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -108,6 +109,7 @@ END;
 CREATE TABLE IF NOT EXISTS payment_providers (
     id TEXT PRIMARY KEY, -- 'stripe', 'paypal', 'authorize_net', etc.
     display_name TEXT NOT NULL,
+    description TEXT, -- Description of the payment provider
     picture TEXT, -- URL to payment provider logo or icon
     is_active INTEGER NOT NULL DEFAULT 1,
     supports_subscriptions INTEGER NOT NULL DEFAULT 0,
@@ -343,6 +345,11 @@ CREATE TABLE IF NOT EXISTS payments (
     status TEXT NOT NULL, -- 'pending', 'requires_confirmation', 'requires_action', 'processing', 'succeeded', 'failed', 'refunded'
     description TEXT,
     error_message TEXT,
+    -- Enhanced tracking fields
+    concept TEXT, -- Human-readable concept (e.g., "Monthly Subscription", "Product Purchase", "Donation")
+    reference_code TEXT, -- Machine-readable code for analytics (e.g., "subscription_monthly", "donation_campaign_2024")
+    category TEXT, -- High-level category (e.g., "subscription", "donation", "purchase", "refund", "fee")
+    tags TEXT, -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount")
     is_guest_payment INTEGER NOT NULL DEFAULT 0, -- Track if this was a guest payment (0 = false, 1 = true)
     guest_data TEXT, -- JSON string with guest information (email, name, phone, etc.)
     guest_email TEXT, -- Extracted guest email for indexing and queries
@@ -386,6 +393,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     billing_address TEXT, -- JSON string
     provider_id TEXT,
     provider_invoice_id TEXT,
+    invoice_url TEXT, -- Optional friendly URL to access the invoice
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
@@ -504,6 +512,10 @@ CREATE INDEX idx_payments_organization_id ON payments(organization_id);
 CREATE INDEX idx_payments_provider_intent_id ON payments(provider_intent_id);
 CREATE INDEX idx_payments_is_guest_payment ON payments(is_guest_payment);
 CREATE INDEX idx_payments_guest_email ON payments(guest_email);
+-- Enhanced payment tracking indexes
+CREATE INDEX idx_payments_reference_code ON payments(reference_code);
+CREATE INDEX idx_payments_category ON payments(category);
+CREATE INDEX idx_payments_concept ON payments(concept);
 CREATE INDEX idx_invoices_order_id ON invoices(order_id);
 CREATE INDEX idx_invoices_subscription_id ON invoices(subscription_id);
 CREATE INDEX idx_invoices_status ON invoices(status);

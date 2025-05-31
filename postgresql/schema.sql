@@ -14,8 +14,9 @@ CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(50),
     is_verified BOOLEAN NOT NULL DEFAULT false,
     is_locked BOOLEAN NOT NULL DEFAULT false,
-    two_factor JSONB, -- JSON object for multiple 2FA methods including encrypted keys
+    two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
     passkeys JSONB, -- JSON array for multiple passkeys
+    metadata JSONB, -- JSON array for additional user information
     first_time BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -106,6 +107,7 @@ EXECUTE FUNCTION update_timestamp();
 CREATE TABLE IF NOT EXISTS payment_providers (
     id VARCHAR(50) PRIMARY KEY, -- 'stripe', 'paypal', 'authorize_net', etc.
     display_name VARCHAR(255) NOT NULL,
+    description VARCHAR(500), -- Description of the payment provider
     picture VARCHAR(255), -- URL to payment provider logo or icon
     is_active BOOLEAN NOT NULL DEFAULT true,
     supports_subscriptions BOOLEAN NOT NULL DEFAULT false,
@@ -327,6 +329,11 @@ CREATE TABLE IF NOT EXISTS payments (
     status VARCHAR(50) NOT NULL, -- 'pending', 'requires_confirmation', 'requires_action', 'processing', 'succeeded', 'failed', 'refunded'
     description TEXT,
     error_message TEXT,
+    -- Enhanced tracking fields
+    concept VARCHAR(100), -- Human-readable concept (e.g., "Monthly Subscription", "Product Purchase", "Donation")
+    reference_code VARCHAR(100), -- Machine-readable code for analytics (e.g., "subscription_monthly", "donation_campaign_2024")
+    category VARCHAR(50), -- High-level category (e.g., "subscription", "donation", "purchase", "refund", "fee")
+    tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount")
     is_guest_payment BOOLEAN NOT NULL DEFAULT false, -- Track if this was a guest payment
     guest_data JSONB, -- JSON object with guest information (email, name, phone, etc.)
     guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
@@ -368,6 +375,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     billing_address JSONB,
     provider_id VARCHAR(50),
     provider_invoice_id VARCHAR(255),
+    invoice_url VARCHAR(500), -- Optional friendly URL to access the invoice
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
@@ -485,6 +493,10 @@ CREATE INDEX idx_payments_organization_id ON payments(organization_id);
 CREATE INDEX idx_payments_provider_intent_id ON payments(provider_intent_id);
 CREATE INDEX idx_payments_is_guest_payment ON payments(is_guest_payment);
 CREATE INDEX idx_payments_guest_email ON payments(guest_email);
+-- Enhanced payment tracking indexes
+CREATE INDEX idx_payments_reference_code ON payments(reference_code);
+CREATE INDEX idx_payments_category ON payments(category);
+CREATE INDEX idx_payments_concept ON payments(concept);
 CREATE INDEX idx_invoices_order_id ON invoices(order_id);
 CREATE INDEX idx_invoices_subscription_id ON invoices(subscription_id);
 CREATE INDEX idx_invoices_status ON invoices(status);

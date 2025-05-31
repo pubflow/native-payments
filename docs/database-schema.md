@@ -4,6 +4,69 @@ This document outlines the database schema for a modular, multi-provider payment
 
 ## Core Tables
 
+### Tokens (Authentication & Security)
+
+```sql
+CREATE TABLE tokens (
+    id VARCHAR(255) PRIMARY KEY,
+    token VARCHAR(64) UNIQUE NOT NULL, -- Hashed token for security
+    type VARCHAR(20) NOT NULL, -- 'email', 'phone', 'username'
+    identifier_value VARCHAR(255) NOT NULL, -- The actual identifier value
+    token_type VARCHAR(30) NOT NULL, -- 'magic_link', 'password_reset', 'email_verification', 'phone_verification'
+    user_id VARCHAR(255) NULL, -- NULL for guest tokens, user ID for registered users
+
+    -- Simple attempt system
+    attempts_remaining INTEGER NOT NULL DEFAULT 1, -- How many attempts are left
+
+    -- Basic states and timestamps
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'consumed', 'expired', 'revoked'
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    consumed_at TIMESTAMP NULL, -- When the token was successfully consumed
+
+    -- Optional metadata
+    metadata JSON NULL,
+
+    -- Foreign key constraint
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Performance indexes
+CREATE INDEX idx_token_lookup ON tokens(token, status, expires_at);
+CREATE INDEX idx_identifier_lookup ON tokens(type, identifier_value, status);
+CREATE INDEX idx_user_tokens ON tokens(user_id, token_type, status);
+CREATE INDEX idx_expiration_cleanup ON tokens(expires_at, status);
+CREATE INDEX idx_token_type_status ON tokens(token_type, status);
+```
+
+**Key Features:**
+- **Unified Token Management**: Single table for all token types (magic links, password reset, verification)
+- **Security First**: Tokens are stored hashed, never in plain text
+- **Built-in Rate Limiting**: Attempt system integrated directly into the token
+- **Guest Support**: Works for both authenticated users and guests
+- **Scalable Design**: Supports email, phone, and username identifiers
+- **Simple Status Management**: Clear token lifecycle with status tracking
+- **Performance Optimized**: Strategic indexes for fast lookups and cleanup
+
+**Security Recommendations:**
+- Always hash tokens before storing using a secure algorithm (e.g., SHA-256 with salt)
+- Set appropriate expiration times (5-15 minutes for magic links, 1 hour for password reset)
+- Implement automatic cleanup of expired tokens
+- Use HTTPS for all token-related endpoints
+- Log token usage for security auditing
+
+**Usage Flow:**
+1. **Create Token**: `attempts_remaining = 4` (configurable)
+2. **Validate Token**: Each failed attempt decrements `attempts_remaining`
+3. **Block Token**: When `attempts_remaining = 0`, token is blocked
+4. **Consume Token**: Valid token sets `status = 'consumed'`
+
+**Common Token Types:**
+- `magic_link`: Passwordless authentication links
+- `password_reset`: Password reset tokens
+- `email_verification`: Email address verification
+- `phone_verification`: Phone number verification
+
 ### Enhanced User Table
 
 ```sql
@@ -519,7 +582,7 @@ INSERT INTO subscriptions (
 );
 ```
 
-### Invoices
+### Invoices (Enhanced with Guest Support)
 
 ```sql
 CREATE TABLE invoices (
@@ -529,6 +592,7 @@ CREATE TABLE invoices (
     subscription_id VARCHAR(255),
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    customer_id VARCHAR(255), -- References provider_customers table (supports both users and guests)
     status VARCHAR(50) NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
     amount_cents BIGINT NOT NULL,
     tax_cents BIGINT NOT NULL DEFAULT 0,
@@ -548,10 +612,20 @@ CREATE TABLE invoices (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
-    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL
+    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL) -- Must belong to a user, organization, or have a customer
 );
 ```
+
+**Key Features:**
+- **Guest Support**: `customer_id` field enables invoices for guests without user accounts
+- **Unified Customer Management**: Links to `provider_customers` table for both users and guests
+- **Flexible Ownership**: Can belong to users, organizations, or guests
+- **Provider Integration**: Supports provider-generated invoices with external URLs
+- **Complete Audit Trail**: Tracks all invoice states and payment dates
+- **Multi-Currency Support**: Handles invoices in different currencies
 
 ### Webhooks and Events
 

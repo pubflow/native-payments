@@ -22,6 +22,31 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Tokens (Authentication & Security)
+CREATE TABLE IF NOT EXISTS tokens (
+    id VARCHAR(255) PRIMARY KEY,
+    token VARCHAR(64) UNIQUE NOT NULL, -- Hashed token for security
+    type VARCHAR(20) NOT NULL, -- 'email', 'phone', 'username'
+    identifier_value VARCHAR(255) NOT NULL, -- The actual identifier value
+    token_type VARCHAR(30) NOT NULL, -- 'magic_link', 'password_reset', 'email_verification', 'phone_verification'
+    user_id VARCHAR(255) NULL, -- NULL for guest tokens, user ID for registered users
+
+    -- Simple attempt system
+    attempts_remaining INT NOT NULL DEFAULT 1, -- How many attempts are left
+
+    -- Basic states and timestamps
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'consumed', 'expired', 'revoked'
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    consumed_at TIMESTAMP NULL, -- When the token was successfully consumed
+
+    -- Optional metadata
+    metadata JSON NULL,
+
+    -- Foreign key constraint
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Organizations
 CREATE TABLE IF NOT EXISTS organizations (
     id VARCHAR(255) PRIMARY KEY,
@@ -296,6 +321,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     subscription_id VARCHAR(255),
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    customer_id VARCHAR(255), -- References provider_customers table (supports both users and guests)
     status VARCHAR(50) NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
     amount_cents BIGINT NOT NULL,
     tax_cents BIGINT NOT NULL DEFAULT 0,
@@ -315,8 +341,10 @@ CREATE TABLE IF NOT EXISTS invoices (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
-    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL
+    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL) -- Must belong to a user, organization, or have a customer
 );
 
 -- Webhooks and Events
@@ -376,6 +404,13 @@ CREATE TABLE IF NOT EXISTS user_memberships (
 );
 
 -- Indexes for performance
+-- Token indexes
+CREATE INDEX idx_token_lookup ON tokens(token, status, expires_at);
+CREATE INDEX idx_identifier_lookup ON tokens(type, identifier_value, status);
+CREATE INDEX idx_user_tokens ON tokens(user_id, token_type, status);
+CREATE INDEX idx_expiration_cleanup ON tokens(expires_at, status);
+CREATE INDEX idx_token_type_status ON tokens(token_type, status);
+
 CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
 CREATE INDEX idx_addresses_type ON addresses(address_type);
@@ -416,6 +451,7 @@ CREATE INDEX idx_payments_category ON payments(category);
 CREATE INDEX idx_payments_concept ON payments(concept);
 CREATE INDEX idx_invoices_order_id ON invoices(order_id);
 CREATE INDEX idx_invoices_subscription_id ON invoices(subscription_id);
+CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
 CREATE INDEX idx_invoices_status ON invoices(status);
 CREATE INDEX idx_payment_webhooks_provider_id ON payment_webhooks(provider_id);
 CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);

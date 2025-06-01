@@ -277,6 +277,13 @@ CREATE TABLE IF NOT EXISTS orders (
     order_number TEXT UNIQUE NOT NULL, -- Human-readable order number
     user_id TEXT,
     organization_id TEXT,
+    customer_id TEXT, -- References provider_customers table (supports registered guests)
+
+    -- Anonymous guest support
+    is_guest_order INTEGER NOT NULL DEFAULT 0, -- Track if this was an anonymous guest order (0 = false, 1 = true)
+    guest_data TEXT, -- JSON string with anonymous guest information (email, name, phone, etc.)
+    guest_email TEXT, -- Extracted guest email for indexing and queries
+
     status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled', 'refunded'
     subtotal_cents INTEGER NOT NULL,
     tax_cents INTEGER NOT NULL DEFAULT 0,
@@ -291,7 +298,8 @@ CREATE TABLE IF NOT EXISTS orders (
     completed_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1) -- Must belong to a user, organization, customer, or be an anonymous guest order
 );
 
 -- Trigger for updated_at on orders
@@ -540,6 +548,9 @@ CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_organization_id ON orders(organization_id);
+CREATE INDEX idx_orders_customer_id ON orders(customer_id);
+CREATE INDEX idx_orders_is_guest_order ON orders(is_guest_order);
+CREATE INDEX idx_orders_guest_email ON orders(guest_email);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_organization_id ON subscriptions(organization_id);

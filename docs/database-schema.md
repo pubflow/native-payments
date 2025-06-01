@@ -316,7 +316,7 @@ CREATE TABLE products (
 - Product variations (size, color, etc.) stored as JSON
 - Parent-child relationships for product variants
 
-### Orders
+### Orders (Enhanced with Complete Guest Support)
 
 ```sql
 CREATE TABLE orders (
@@ -324,6 +324,13 @@ CREATE TABLE orders (
     order_number VARCHAR(255) UNIQUE NOT NULL, -- Human-readable order number
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    customer_id VARCHAR(255), -- References provider_customers table (supports registered guests)
+
+    -- Anonymous guest support
+    is_guest_order BOOLEAN NOT NULL DEFAULT false, -- Track if this was an anonymous guest order
+    guest_data JSON, -- JSON object with anonymous guest information (email, name, phone, etc.)
+    guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
+
     status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled', 'refunded'
     subtotal_cents BIGINT NOT NULL,
     tax_cents BIGINT NOT NULL DEFAULT 0,
@@ -338,9 +345,10 @@ CREATE TABLE orders (
     completed_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (shipping_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = true) -- Must belong to a user, organization, customer, or be an anonymous guest order
 );
 
 CREATE TABLE order_items (
@@ -355,6 +363,42 @@ CREATE TABLE order_items (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT
 );
+```
+
+**Key Features:**
+- **Complete Guest Support**: Supports both registered guests (`customer_id`) and anonymous guests (`is_guest_order`)
+- **Registered Guests**: Uses `customer_id` to reference `provider_customers` for guests who want to save payment methods
+- **Anonymous Guests**: Uses `is_guest_order` flag with `guest_data` JSON for completely anonymous checkout
+- **Unified Customer Management**: Consistent with subscriptions and invoices design
+- **Flexible Ownership**: Can belong to users, organizations, registered guests, or anonymous guests
+- **Performance Optimized**: Proper indexing on guest fields for fast queries
+- **Backward Compatible**: Existing user and organization orders continue to work
+
+**Guest Order Types:**
+
+1. **Anonymous Guest Order** (No account, no saved data):
+```sql
+INSERT INTO orders (
+    is_guest_order, guest_data, guest_email, total_cents, currency
+) VALUES (
+    true,
+    '{"email": "anon@example.com", "name": "John Anonymous", "phone": "+1234567890"}',
+    'anon@example.com',
+    2999,
+    'USD'
+);
+```
+
+2. **Registered Guest Order** (Saved payment methods, no full account):
+```sql
+INSERT INTO orders (customer_id, total_cents, currency)
+VALUES ('cust_guest_456', 2999, 'USD');
+```
+
+3. **Authenticated User Order** (Full account):
+```sql
+INSERT INTO orders (user_id, total_cents, currency)
+VALUES ('user_123', 2999, 'USD');
 ```
 
 ### Payments

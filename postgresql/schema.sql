@@ -262,6 +262,13 @@ CREATE TABLE IF NOT EXISTS orders (
     order_number VARCHAR(255) UNIQUE NOT NULL, -- Human-readable order number
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    customer_id VARCHAR(255), -- References provider_customers table (supports registered guests)
+
+    -- Anonymous guest support
+    is_guest_order BOOLEAN NOT NULL DEFAULT false, -- Track if this was an anonymous guest order
+    guest_data JSONB, -- JSON object with anonymous guest information (email, name, phone, etc.)
+    guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
+
     status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'pending', 'paid', 'cancelled', 'refunded'
     subtotal_cents BIGINT NOT NULL,
     tax_cents BIGINT NOT NULL DEFAULT 0,
@@ -276,7 +283,8 @@ CREATE TABLE IF NOT EXISTS orders (
     completed_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL) -- Must belong to either a user or organization
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = true) -- Must belong to a user, organization, customer, or be an anonymous guest order
 );
 
 CREATE TRIGGER update_orders_timestamp
@@ -518,6 +526,9 @@ CREATE INDEX idx_addresses_address_type ON addresses(address_type);
 CREATE INDEX idx_addresses_is_default ON addresses(is_default);
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_organization_id ON orders(organization_id);
+CREATE INDEX idx_orders_customer_id ON orders(customer_id);
+CREATE INDEX idx_orders_is_guest_order ON orders(is_guest_order);
+CREATE INDEX idx_orders_guest_email ON orders(guest_email);
 CREATE INDEX idx_orders_status ON orders(status);
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_organization_id ON subscriptions(organization_id);

@@ -24,7 +24,8 @@ CREATE TABLE tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     consumed_at TIMESTAMP NULL, -- When the token was successfully consumed
 
-    -- Optional metadata
+    -- Optional context and metadata
+    context VARCHAR(255) NULL, -- Optional context for two-factor validation (e.g., 'change_username_samuelorecio_to_michaeljackson')
     metadata JSON NULL,
 
     -- Foreign key constraint
@@ -45,6 +46,7 @@ CREATE INDEX idx_token_type_status ON tokens(token_type, status);
 - **Built-in Rate Limiting**: Attempt system integrated directly into the token
 - **Guest Support**: Works for both authenticated users and guests
 - **Scalable Design**: Supports email, phone, and username identifiers
+- **Context Support**: Optional context field for two-factor validation scenarios
 - **Simple Status Management**: Clear token lifecycle with status tracking
 - **Performance Optimized**: Strategic indexes for fast lookups and cleanup
 
@@ -67,38 +69,242 @@ CREATE INDEX idx_token_type_status ON tokens(token_type, status);
 - `email_verification`: Email address verification
 - `phone_verification`: Phone number verification
 
-### Enhanced User Table
+### Enhanced User Table (Hybrid Soft Delete + ON DELETE CASCADE Strategy)
 
 ```sql
 CREATE TABLE users (
     id VARCHAR(255) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    last_name VARCHAR(255) NOT NULL,
+    name VARCHAR(255), -- Optional: first name
+    last_name VARCHAR(255), -- Optional: last name
     email VARCHAR(255) NOT NULL UNIQUE,
     user_type VARCHAR(255) NOT NULL, -- 'individual', 'business', 'admin'
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
     password_hash TEXT,
-    recovery_email VARCHAR(255),
-    phone VARCHAR(50),
+    phone VARCHAR(50) UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified BOOLEAN NOT NULL DEFAULT false,
     is_locked BOOLEAN NOT NULL DEFAULT false,
     two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
-    passkeys JSON, -- JSON array for multiple passkeys
-    metadata JSON, -- JSON array for additional user information
+    lang VARCHAR(10) NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
+    metadata JSON, -- JSON object for additional user information in English
     first_time BOOLEAN NOT NULL DEFAULT true,
+
+    -- Soft Delete Fields (Default Strategy)
+    deleted_at TIMESTAMP NULL, -- Timestamp when user was deleted (NULL = active)
+    deletion_reason VARCHAR(100) NULL, -- Reason: 'user_request', 'admin_action', 'gdpr_compliance', 'inactivity', 'violation'
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- ========================================
+-- OPTIMIZED INDEXES FOR USERS TABLE
+-- ========================================
+
+-- Primary functional indexes
+CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_user_name ON users(user_name) WHERE deleted_at IS NULL AND user_name IS NOT NULL;
+CREATE INDEX idx_users_user_type ON users(user_type) WHERE deleted_at IS NULL;
+
+-- Soft delete indexes (for efficient queries on active/deleted users)
+CREATE INDEX idx_users_active ON users(deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_deleted ON users(deleted_at, deletion_reason) WHERE deleted_at IS NOT NULL;
+
+-- Authentication and verification indexes
+CREATE INDEX idx_users_email_verified ON users(email, is_verified) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_verification_status ON users(is_verified) WHERE deleted_at IS NULL;
+
+-- Search and filtering indexes
+CREATE INDEX idx_users_name_search ON users(name, last_name) WHERE deleted_at IS NULL;
+
+-- Security and account status indexes
+CREATE INDEX idx_users_locked_status ON users(is_locked) WHERE deleted_at IS NULL AND is_locked = true;
+CREATE INDEX idx_users_two_factor ON users(two_factor) WHERE deleted_at IS NULL AND two_factor = true;
+
+-- Temporal indexes for analytics and maintenance
+CREATE INDEX idx_users_created_at ON users(created_at) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_updated_at ON users(updated_at) WHERE deleted_at IS NULL;
+
+-- Language and metadata indexes
+CREATE INDEX idx_users_lang ON users(lang) WHERE deleted_at IS NULL AND lang IS NOT NULL;
+
+-- Composite indexes for common query patterns
+CREATE INDEX idx_users_type_verified ON users(user_type, is_verified) WHERE deleted_at IS NULL;
+CREATE INDEX idx_users_email_type ON users(email, user_type) WHERE deleted_at IS NULL;
 ```
 
-**Key Features:**
-- `is_verified`: Tracks email verification status
-- `is_locked`: Account lock status for security
-- `two_factor`: Boolean flag indicating if 2FA is enabled
-- `passkeys`: JSON array for WebAuthn/passkey support
-- `metadata`: JSON array for additional user information and custom data
-- `first_time`: Flag for first-time user experience
+## 🔄 **User Deletion Strategy**
+
+### **Hybrid Approach: Soft Delete + ON DELETE CASCADE**
+
+This system implements a flexible user deletion strategy that balances data retention, compliance requirements, and operational efficiency.
+
+#### **Default Strategy: Soft Delete**
+- **Purpose**: Preserve data for analytics, auditing, and accidental recovery
+- **Implementation**: Set `deleted_at` timestamp and `deletion_reason`
+- **Benefits**:
+  - ✅ Data recovery possible
+  - ✅ Historical analytics preserved
+  - ✅ Audit trail maintained
+  - ✅ No constraint violations
+
+#### **Compliance Strategy: Hard Delete**
+- **Purpose**: Complete data removal for GDPR/CCPA compliance
+- **Implementation**: Physical deletion with `ON DELETE CASCADE`
+- **Benefits**:
+  - ✅ Complete data removal
+  - ✅ Regulatory compliance
+  - ✅ No orphaned records
+  - ✅ Automatic cleanup
+
+#### **Deletion Reasons**
+- `user_request`: User-initiated account deletion
+- `admin_action`: Administrative deletion
+- `gdpr_compliance`: GDPR/CCPA compliance deletion
+- `inactivity`: Automatic cleanup of inactive accounts
+- `violation`: Terms of service violation
+
+#### **Backend Implementation**
+```javascript
+// Soft delete (default)
+await softDeleteUser(userId, 'user_request');
+
+// Hard delete (compliance)
+await hardDeleteUser(userId, 'gdpr_compliance');
+```
+
+### **Key Features:**
+- **Soft Delete Fields**: `deleted_at`, `deletion_reason`
+- **Optimized Indexes**: Partial indexes for active users only
+- **Flexible Queries**: Easy filtering of active vs deleted users
+- **Compliance Ready**: Support for complete data removal
+- **Performance Optimized**: Strategic indexing for common query patterns
+- **Security Enhanced**: Account status and verification tracking
+- **Search Friendly**: Efficient search capabilities with separate name/last_name indexing
+
+## 🔗 **Foreign Key Constraints Strategy**
+
+### **ON DELETE CASCADE Implementation**
+
+All foreign keys referencing the `users` table are configured with appropriate deletion strategies:
+
+#### **CASCADE (Complete Removal)**
+These tables will be **automatically deleted** when a user is removed:
+- `tokens` - Authentication tokens
+- `addresses` - User addresses
+- `payment_methods` - Saved payment methods
+- `provider_customers` - Provider customer records
+- `organization_users` - Organization memberships
+- `subscriptions` - Active subscriptions
+- `user_memberships` - Membership records
+- `user_cohorts` - Analytics cohorts
+
+#### **SET NULL (Preserve Records)**
+These tables will **preserve records** but remove user reference:
+- `orders` - Order history (for business records)
+- `payments` - Payment transactions (for financial records)
+- `invoices` - Invoice history (for accounting)
+- `user_events` - Analytics events (anonymized)
+
+### **Database Consistency**
+
+**All three database schemas (PostgreSQL, MySQL, SQLite) implement identical constraint strategies:**
+
+```sql
+-- Personal data (CASCADE - complete removal)
+FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+-- Business data (SET NULL - preserve with anonymization)
+FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+```
+
+### **Benefits of This Approach**
+
+✅ **No Constraint Violations**: Automatic cleanup prevents foreign key errors
+✅ **Data Integrity**: Business records preserved for compliance
+✅ **Privacy Compliance**: Personal data completely removed
+✅ **Operational Safety**: No manual cleanup required
+✅ **Audit Trail**: Financial records maintained for legal requirements
+
+## 🛡️ **Data Retention Best Practices**
+
+### **What to Keep vs What to Delete**
+
+#### **❌ Data to DELETE (Personal Information)**
+- User profile data (name, email, phone)
+- Personal preferences and settings
+- Authentication tokens and sessions
+- Personal addresses and payment methods
+- Direct user communications
+
+#### **✅ Data to PRESERVE (Business Critical)**
+- **Financial Records**: Completed transactions, invoices, tax records
+- **Analytics Data**: Aggregated metrics, revenue reports (anonymized)
+- **Audit Logs**: Security events, compliance records
+- **Legal Requirements**: Data required by law or regulation
+- **Business Intelligence**: Anonymized behavioral data
+
+#### **🔄 Data to ANONYMIZE**
+- Order history → Replace user details with "Deleted User"
+- Payment records → Keep transaction data, remove personal identifiers
+- Support tickets → Preserve content, anonymize user information
+
+### **Implementation Examples**
+
+#### **Soft Delete Query (Default)**
+```sql
+-- Mark user as deleted (preserves all data)
+UPDATE users
+SET deleted_at = CURRENT_TIMESTAMP,
+    deletion_reason = 'user_request'
+WHERE id = 'user_123';
+
+-- Query active users only
+SELECT * FROM users WHERE deleted_at IS NULL;
+```
+
+#### **Hard Delete Query (Compliance)**
+```sql
+-- Complete removal (triggers CASCADE)
+DELETE FROM users WHERE id = 'user_123';
+-- This automatically removes:
+-- - tokens, addresses, payment_methods
+-- - subscriptions, orders (SET NULL)
+-- - organization memberships
+```
+
+#### **Anonymization Query (Hybrid)**
+```sql
+-- Anonymize user data while preserving business records
+UPDATE users
+SET name = 'Deleted User',
+    last_name = '',
+    email = CONCAT('deleted_', id, '@example.com'),
+    phone = NULL,
+    picture = NULL,
+    deleted_at = CURRENT_TIMESTAMP,
+    deletion_reason = 'gdpr_compliance'
+WHERE id = 'user_123';
+```
+
+### **Compliance Considerations**
+
+#### **GDPR Requirements**
+- **Right to be Forgotten**: Complete data removal within 30 days
+- **Data Minimization**: Only keep necessary business data
+- **Consent Withdrawal**: Remove all consent-based data
+
+#### **Business Requirements**
+- **Financial Records**: Keep for 7+ years (tax requirements)
+- **Audit Trails**: Preserve for compliance and security
+- **Analytics**: Use anonymized/aggregated data only
+
+### **Recommended Deletion Workflow**
+
+1. **User Request** → Soft delete (immediate)
+2. **Grace Period** → 30 days for recovery
+3. **Anonymization** → Replace personal data with generic values
+4. **Hard Delete** → Only if legally required or after retention period
 
 ### Organizations
 
@@ -150,6 +356,7 @@ CREATE TABLE addresses (
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest address
     guest_email VARCHAR(255), -- Email for guest addresses (for identification)
     guest_name VARCHAR(255), -- Name for guest addresses
+    metadata JSON, -- JSON object for additional address information (e.g., nickname, category, notes)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -166,6 +373,7 @@ CREATE TABLE addresses (
 - `is_guest`: Boolean flag to identify guest addresses
 - `guest_email`: Email for guest address identification and management
 - `guest_name`: Display name for guest addresses
+- `metadata`: JSON object for additional address information (nicknames, categories, notes)
 - Modified CHECK constraint to allow guest addresses without user_id or organization_id
 
 ## Payment Provider Integration
@@ -241,6 +449,7 @@ CREATE TABLE payment_methods (
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest payment method
     guest_email VARCHAR(255), -- Email for guest payment methods (for identification)
     guest_name VARCHAR(255), -- Name for guest payment methods
+    metadata JSON, -- JSON object for additional payment method information (e.g., nickname, category)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -257,6 +466,8 @@ CREATE TABLE payment_methods (
 - Provider-agnostic design with provider-specific IDs
 - `is_guest`: Boolean flag to identify guest payment methods
 - `guest_email`: Email for guest payment method identification and management
+- `guest_name`: Name for guest payment methods
+- `metadata`: JSON object for additional payment method information (nicknames, categories)
 - Modified CHECK constraint to allow guest payment methods without user_id or organization_id
 
 ## Transaction Tables

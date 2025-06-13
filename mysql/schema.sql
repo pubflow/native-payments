@@ -1,26 +1,30 @@
 -- MySQL Schema for Native Payments System
 
--- Users Table (Enhanced)
+-- Users Table (Enhanced) - Hybrid Soft Delete + ON DELETE CASCADE Strategy
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(255) PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    last_name VARCHAR(255) NOT NULL,
+    name VARCHAR(255), -- Optional: first name
+    last_name VARCHAR(255), -- Optional: last name
     email VARCHAR(255) NOT NULL UNIQUE,
     user_type VARCHAR(255) NOT NULL, -- 'individual', 'business', 'admin'
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
     password_hash TEXT,
-    recovery_email VARCHAR(255),
-    phone VARCHAR(50),
+    phone VARCHAR(50) UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified BOOLEAN NOT NULL DEFAULT false,
     is_locked BOOLEAN NOT NULL DEFAULT false,
     two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
-    passkeys JSON, -- JSON array for multiple passkeys
-    metadata JSON, -- JSON array for additional user information
+    lang VARCHAR(10) NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
+    metadata JSON, -- JSON object for additional user information in English
     first_time BOOLEAN NOT NULL DEFAULT true,
+
+    -- Soft Delete Fields (Default Strategy)
+    deleted_at TIMESTAMP NULL, -- Timestamp when user was deleted (NULL = active)
+    deletion_reason VARCHAR(100) NULL, -- Reason: 'user_request', 'admin_action', 'gdpr_compliance', 'inactivity', 'violation'
+
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Tokens (Authentication & Security)
 CREATE TABLE IF NOT EXISTS tokens (
@@ -40,7 +44,8 @@ CREATE TABLE IF NOT EXISTS tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     consumed_at TIMESTAMP NULL, -- When the token was successfully consumed
 
-    -- Optional metadata
+    -- Optional context and metadata
+    context VARCHAR(255) NULL, -- Optional context for two-factor validation (e.g., 'change_username_samuelorecio_to_michaeljackson')
     metadata JSON NULL,
 
     -- Foreign key constraint
@@ -126,6 +131,7 @@ CREATE TABLE IF NOT EXISTS addresses (
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest address
     guest_email VARCHAR(255), -- Email for guest addresses (for identification)
     guest_name VARCHAR(255), -- Name for guest addresses
+    metadata JSON, -- JSON object for additional address information (e.g., nickname, category, notes)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -150,6 +156,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest payment method
     guest_email VARCHAR(255), -- Email for guest payment methods (for identification)
     guest_name VARCHAR(255), -- Name for guest payment methods
+    metadata JSON, -- JSON object for additional payment method information (e.g., nickname, category)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -411,7 +418,46 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
 );
 
--- Indexes for performance
+-- ========================================
+-- OPTIMIZED INDEXES FOR USERS TABLE
+-- ========================================
+
+-- Primary functional indexes
+CREATE INDEX idx_users_email ON users(email, deleted_at);
+CREATE INDEX idx_users_user_name ON users(user_name, deleted_at);
+CREATE INDEX idx_users_phone ON users(phone, deleted_at);
+CREATE INDEX idx_users_user_type ON users(user_type, deleted_at);
+
+-- Soft delete indexes (for efficient queries on active/deleted users)
+CREATE INDEX idx_users_active ON users(deleted_at);
+CREATE INDEX idx_users_deleted ON users(deleted_at, deletion_reason);
+
+-- Authentication and verification indexes
+CREATE INDEX idx_users_email_verified ON users(email, is_verified, deleted_at);
+CREATE INDEX idx_users_verification_status ON users(is_verified, deleted_at);
+
+-- Search and filtering indexes
+CREATE INDEX idx_users_name_search ON users(name, last_name, deleted_at);
+
+-- Security and account status indexes
+CREATE INDEX idx_users_locked_status ON users(is_locked, deleted_at);
+CREATE INDEX idx_users_two_factor ON users(two_factor, deleted_at);
+
+-- Temporal indexes for analytics and maintenance
+CREATE INDEX idx_users_created_at ON users(created_at, deleted_at);
+CREATE INDEX idx_users_updated_at ON users(updated_at, deleted_at);
+
+-- Language and metadata indexes
+CREATE INDEX idx_users_lang ON users(lang, deleted_at);
+
+-- Composite indexes for common query patterns
+CREATE INDEX idx_users_type_verified ON users(user_type, is_verified, deleted_at);
+CREATE INDEX idx_users_email_type ON users(email, user_type, deleted_at);
+
+-- ========================================
+-- OTHER TABLE INDEXES
+-- ========================================
+
 -- Token indexes
 CREATE INDEX idx_token_lookup ON tokens(token, status, expires_at);
 CREATE INDEX idx_identifier_lookup ON tokens(type, identifier_value, status);
@@ -422,32 +468,42 @@ CREATE INDEX idx_token_type_status ON tokens(token_type, status);
 CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
 CREATE INDEX idx_addresses_type ON addresses(address_type);
+CREATE INDEX idx_addresses_is_guest ON addresses(is_guest);
+CREATE INDEX idx_addresses_guest_email ON addresses(guest_email);
+CREATE INDEX idx_addresses_is_default ON addresses(is_default);
+
 CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
 CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
 CREATE INDEX idx_provider_customers_is_guest ON provider_customers(is_guest);
 CREATE INDEX idx_provider_customers_guest_email ON provider_customers(guest_email);
+
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
 CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
+
 CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
 CREATE INDEX idx_addresses_is_guest ON addresses(is_guest);
 CREATE INDEX idx_addresses_guest_email ON addresses(guest_email);
 CREATE INDEX idx_addresses_address_type ON addresses(address_type);
 CREATE INDEX idx_addresses_is_default ON addresses(is_default);
+
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_organization_id ON orders(organization_id);
 CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX idx_orders_is_guest_order ON orders(is_guest_order);
 CREATE INDEX idx_orders_guest_email ON orders(guest_email);
 CREATE INDEX idx_orders_status ON orders(status);
+
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_organization_id ON subscriptions(organization_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date, billing_status);
 CREATE INDEX idx_subscriptions_billing_status ON subscriptions(billing_status);
 CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attempt, billing_retry_count);
+
+CREATE INDEX IF NOT EXISTS idx_guest_payments ON payments(guest_email, is_guest_payment, created_at);
 CREATE INDEX idx_payments_order_id ON payments(order_id);
 CREATE INDEX idx_payments_subscription_id ON payments(subscription_id);
 CREATE INDEX idx_payments_status ON payments(status);
@@ -460,15 +516,20 @@ CREATE INDEX idx_payments_guest_email ON payments(guest_email);
 CREATE INDEX idx_payments_reference_code ON payments(reference_code);
 CREATE INDEX idx_payments_category ON payments(category);
 CREATE INDEX idx_payments_concept ON payments(concept);
+
 CREATE INDEX idx_invoices_order_id ON invoices(order_id);
 CREATE INDEX idx_invoices_subscription_id ON invoices(subscription_id);
 CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);
 CREATE INDEX idx_invoices_status ON invoices(status);
+
 CREATE INDEX idx_payment_webhooks_provider_id ON payment_webhooks(provider_id);
 CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
+
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
+
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
 CREATE INDEX idx_user_memberships_status ON user_memberships(status);
+
 CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
 
 -- Analytics Tables (Optional Feature)
@@ -520,8 +581,11 @@ CREATE TABLE IF NOT EXISTS user_cohorts (
 -- Analytics Indexes
 CREATE INDEX idx_analytics_snapshots_date_type ON analytics_snapshots(snapshot_date, metric_type);
 CREATE INDEX idx_analytics_snapshots_currency ON analytics_snapshots(currency);
+
 CREATE INDEX idx_analytics_events_user_id ON analytics_events(user_id);
 CREATE INDEX idx_analytics_events_type ON analytics_events(event_type);
+
 CREATE INDEX idx_analytics_events_category ON analytics_events(event_category);
+
 CREATE INDEX idx_user_cohorts_month ON user_cohorts(cohort_month);
 CREATE INDEX idx_user_cohorts_type ON user_cohorts(cohort_type);

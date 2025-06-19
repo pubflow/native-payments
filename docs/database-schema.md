@@ -439,7 +439,8 @@ CREATE TABLE payment_methods (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_payment_method_id VARCHAR(255) NOT NULL, -- ID from the provider
-    payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', etc.
+    payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
+    wallet_type VARCHAR(50), -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four VARCHAR(4), -- Last 4 digits of card or account
     expiry_month VARCHAR(2), -- Expiration month (for cards)
     expiry_year VARCHAR(4), -- Expiration year (for cards)
@@ -464,11 +465,18 @@ CREATE TABLE payment_methods (
 - Links to addresses table for billing information
 - Supports multiple payment types (cards, bank accounts, digital wallets)
 - Provider-agnostic design with provider-specific IDs
+- `wallet_type`: Specifies the type of wallet payment (apple_pay, google_pay, samsung_pay, etc.) when payment_type is 'wallet'
 - `is_guest`: Boolean flag to identify guest payment methods
 - `guest_email`: Email for guest payment method identification and management
 - `guest_name`: Name for guest payment methods
 - `metadata`: JSON object for additional payment method information (nicknames, categories)
 - Modified CHECK constraint to allow guest payment methods without user_id or organization_id
+
+**Wallet Payment Types:**
+- `apple_pay`: Apple Pay wallet payments
+- `google_pay`: Google Pay wallet payments
+- `samsung_pay`: Samsung Pay wallet payments
+- Additional wallet types can be added as needed
 
 ## Transaction Tables
 

@@ -235,7 +235,8 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     organization_id TEXT,
     provider_id TEXT NOT NULL,
     provider_payment_method_id TEXT NOT NULL, -- ID from the provider
-    payment_type TEXT NOT NULL, -- 'credit_card', 'bank_account', 'paypal', etc.
+    payment_type TEXT NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
+    wallet_type TEXT, -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four TEXT, -- Last 4 digits of card or account
     expiry_month TEXT, -- Expiration month (for cards)
     expiry_year TEXT, -- Expiration year (for cards)

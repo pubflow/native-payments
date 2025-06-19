@@ -285,13 +285,18 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     reference_code VARCHAR(100), -- Machine-readable code for analytics (e.g., "subscription_monthly", "plan_premium_annual")
     category VARCHAR(50), -- High-level category (e.g., "subscription", "trial", "upgrade", "downgrade")
     tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount,premium")
+
+    -- Guest subscription support (inspired by payments table)
+    is_guest_subscription BOOLEAN NOT NULL DEFAULT FALSE, -- Track if this is a guest subscription
+    guest_data JSON, -- JSON data with guest information (email, name, phone, etc.)
+    guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL), -- Must belong to a user, organization, or have a customer
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_subscription = TRUE), -- Must belong to a user, organization, have a customer, or be guest subscription
     CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly')),
     CHECK (interval_multiplier IS NULL OR (interval_multiplier > 0 AND interval_multiplier <= 12)),
     CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled'))
@@ -513,6 +518,10 @@ CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attem
 CREATE INDEX idx_subscriptions_reference_code ON subscriptions(reference_code);
 CREATE INDEX idx_subscriptions_category ON subscriptions(category);
 CREATE INDEX idx_subscriptions_concept ON subscriptions(concept);
+-- Guest subscription indexes
+CREATE INDEX idx_subscriptions_is_guest ON subscriptions(is_guest_subscription);
+CREATE INDEX idx_subscriptions_guest_email ON subscriptions(guest_email);
+CREATE INDEX idx_guest_subscriptions ON subscriptions(guest_email, is_guest_subscription, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_guest_payments ON payments(guest_email, is_guest_payment, created_at);
 CREATE INDEX idx_payments_order_id ON payments(order_id);

@@ -701,6 +701,13 @@ CREATE TABLE subscriptions (
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Enhanced tracking fields (inspired by payments table)
+    description TEXT, -- Human-readable description (e.g., "Premium Monthly Plan", "Basic Annual Subscription")
+    concept VARCHAR(100), -- Human-readable concept (e.g., "Monthly Subscription", "Annual Plan", "Trial Subscription")
+    reference_code VARCHAR(100), -- Machine-readable code for analytics (e.g., "subscription_monthly", "plan_premium_annual")
+    category VARCHAR(50), -- High-level category (e.g., "subscription", "trial", "upgrade", "downgrade")
+    tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount,premium")
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
@@ -726,6 +733,7 @@ CREATE TABLE subscriptions (
 - **Automatic Billing**: Built-in support for automatic subscription renewals with flexible intervals
 - **Retry Logic**: Configurable retry attempts for failed billing with status tracking
 - **Flexible Intervals**: Support for custom billing frequencies using interval multipliers
+- **Enhanced Tracking**: Advanced tracking fields for analytics and categorization (inspired by payments table)
 
 #### Billing Automation Features
 
@@ -753,31 +761,94 @@ CREATE TABLE subscriptions (
 - `max_retry_attempts`: Configurable retry limit (default: 3)
 - `last_billing_attempt`: Timestamp of last billing attempt
 
-#### Subscription Use Cases
+#### Enhanced Tracking Fields
 
-**1. Traditional Product Subscriptions** (with `product_id`)
-```sql
--- Monthly premium plan subscription
-INSERT INTO subscriptions (
-    customer_id, product_id, price_cents, currency,
-    billing_interval, interval_multiplier, next_billing_date
-) VALUES (
-    'cust_123', 'prod_premium_monthly', 2999, 'USD',
-    'monthly', 1, '2024-02-15 00:00:00'
-);
+**Description & Concept:**
+- `description`: Human-readable description for display purposes (e.g., "Premium Monthly Plan", "Basic Annual Subscription")
+- `concept`: **Primary subscription title/name** used across all providers (e.g., "Monthly Subscription", "Annual Plan", "Trial Subscription")
+  - **Provider Integration**: The `concept` field is used as the subscription title/name in external providers like Stripe
+  - **Consistency**: Ensures the same subscription name appears in both internal system and external provider dashboards
+
+**Analytics & Categorization:**
+- `reference_code`: Machine-readable code for analytics and reporting (e.g., "subscription_monthly", "plan_premium_annual")
+- `category`: High-level category for grouping (e.g., "subscription", "trial", "upgrade", "downgrade")
+- `tags`: Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount,premium")
+
+**Automatic Population:**
+- **Product Subscriptions**: `description` defaults to product name + billing interval
+- **Custom Subscriptions**: `description` includes price and billing frequency
+- **Reference Codes**: Auto-generated based on subscription type and parameters
+- **Categories**: Default to "subscription" but can be customized for specific use cases
+
+#### Provider Integration (Stripe, PayPal, etc.)
+
+**Concept as Subscription Title:**
+- The `concept` field is automatically used as the subscription title/name in external providers
+- **Stripe Integration**: `concept` becomes the subscription description and product name
+- **Metadata Sync**: All tracking fields are synced to provider metadata for consistency
+- **Dashboard Consistency**: Same subscription names appear in both internal and provider dashboards
+
+**Provider Metadata Mapping:**
+```json
+{
+  "subscription_title": "concept_value",
+  "subscription_concept": "concept_value",
+  "subscription_description": "description_value",
+  "subscription_category": "category_value",
+  "subscription_reference_code": "reference_code_value"
+}
 ```
 
-**2. Custom Donation Subscriptions** (without `product_id`)
+**Example Provider Integration:**
+```javascript
+// Custom subscription with concept
+{
+  "concept": "Premium Business Plan",
+  "description": "Monthly premium subscription for business users",
+  "reference_code": "sub_premium_business_monthly",
+  "category": "subscription",
+  "tags": "premium,business,monthly"
+}
+
+// Results in Stripe:
+// - Subscription Description: "Premium Business Plan"
+// - Product Name: "Premium Business Plan"
+// - Metadata includes all tracking fields
+```
+
+#### Subscription Use Cases
+
+**1. Traditional Product Subscriptions** (with `product_id` and tracking fields)
 ```sql
--- Monthly donation of $25
+-- Monthly premium plan subscription with concept as title
 INSERT INTO subscriptions (
     customer_id, product_id, price_cents, currency,
-    billing_interval, interval_multiplier, next_billing_date, metadata
+    billing_interval, interval_multiplier, next_billing_date,
+    concept, description, reference_code, category, tags
+) VALUES (
+    'cust_123', 'prod_premium_monthly', 2999, 'USD',
+    'monthly', 1, '2024-02-15 00:00:00',
+    'Premium Monthly Plan', 'Premium business subscription with advanced features',
+    'sub_premium_monthly_2024', 'subscription', 'premium,business,monthly'
+);
+-- Results in Stripe: Subscription titled "Premium Monthly Plan"
+```
+
+**2. Custom Donation Subscriptions** (without `product_id` but with concept title)
+```sql
+-- Monthly donation with concept as subscription title
+INSERT INTO subscriptions (
+    customer_id, product_id, price_cents, currency,
+    billing_interval, interval_multiplier, next_billing_date,
+    concept, description, reference_code, category, tags, metadata
 ) VALUES (
     'cust_456', NULL, 2500, 'USD',
     'monthly', 1, '2024-02-15 00:00:00',
+    'Monthly Animal Shelter Donation', 'Monthly $25 donation to support animal shelter',
+    'donation_animal_shelter_monthly', 'donation', 'donation,monthly,animal,charity',
     '{"type": "monthly_donation", "cause": "animal_shelter"}'
 );
+-- Results in Stripe: Subscription titled "Monthly Animal Shelter Donation"
 ```
 
 **3. Flexible Service Subscriptions** (without `product_id`)
@@ -1025,6 +1096,11 @@ CREATE INDEX idx_subscriptions_provider_id ON subscriptions(provider_id);
 CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date, billing_status);
 CREATE INDEX idx_subscriptions_billing_status ON subscriptions(billing_status);
 CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attempt, billing_retry_count);
+
+-- Enhanced subscription tracking indexes
+CREATE INDEX idx_subscriptions_reference_code ON subscriptions(reference_code);
+CREATE INDEX idx_subscriptions_category ON subscriptions(category);
+CREATE INDEX idx_subscriptions_concept ON subscriptions(concept);
 
 -- Membership lookups
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);

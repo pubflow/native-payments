@@ -278,6 +278,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Enhanced tracking fields (inspired by payments table)
+    description TEXT, -- Human-readable description (e.g., "Premium Monthly Plan", "Basic Annual Subscription")
+    concept VARCHAR(100), -- Human-readable concept (e.g., "Monthly Subscription", "Annual Plan", "Trial Subscription")
+    reference_code VARCHAR(100), -- Machine-readable code for analytics (e.g., "subscription_monthly", "plan_premium_annual")
+    category VARCHAR(50), -- High-level category (e.g., "subscription", "trial", "upgrade", "downgrade")
+    tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount,premium")
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
@@ -502,6 +509,10 @@ CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_subscriptions_next_billing ON subscriptions(next_billing_date, billing_status);
 CREATE INDEX idx_subscriptions_billing_status ON subscriptions(billing_status);
 CREATE INDEX idx_subscriptions_retry_billing ON subscriptions(last_billing_attempt, billing_retry_count);
+-- Enhanced subscription tracking indexes
+CREATE INDEX idx_subscriptions_reference_code ON subscriptions(reference_code);
+CREATE INDEX idx_subscriptions_category ON subscriptions(category);
+CREATE INDEX idx_subscriptions_concept ON subscriptions(concept);
 
 CREATE INDEX IF NOT EXISTS idx_guest_payments ON payments(guest_email, is_guest_payment, created_at);
 CREATE INDEX idx_payments_order_id ON payments(order_id);

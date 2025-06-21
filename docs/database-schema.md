@@ -511,7 +511,10 @@ CREATE TABLE products (
     description TEXT,
     product_type VARCHAR(50) NOT NULL, -- 'physical', 'digital', 'service', 'subscription'
     is_recurring BOOLEAN NOT NULL DEFAULT false,
-    price_cents BIGINT NOT NULL,
+
+    -- PRODUCT PRICING (only base price - tax calculated dynamically)
+    subtotal_cents BIGINT NOT NULL, -- Base product price (before tax/discounts)
+
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     billing_interval VARCHAR(20), -- 'monthly', 'yearly', null for one-time
     trial_days INTEGER DEFAULT 0,
@@ -696,7 +699,13 @@ CREATE TABLE subscriptions (
     current_period_end TIMESTAMP NOT NULL,
     cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
     trial_end TIMESTAMP,
-    price_cents BIGINT NOT NULL,
+
+    -- NEW UNIFIED PRICING SYSTEM
+    subtotal_cents BIGINT NOT NULL, -- Base subscription price
+    tax_cents BIGINT NOT NULL DEFAULT 0, -- Applied taxes
+    discount_cents BIGINT NOT NULL DEFAULT 0, -- Applied discounts
+    total_cents BIGINT NOT NULL, -- Final subscription price (subtotal + tax - discount)
+
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     -- Billing automation fields
     billing_interval VARCHAR(20) NOT NULL DEFAULT 'monthly', -- 'daily', 'weekly', 'monthly', 'yearly'
@@ -1274,3 +1283,80 @@ WHERE customer_id IN (
 3. **Data Integrity**: No data loss during conversion
 4. **Performance**: Efficient queries with proper indexing
 5. **Flexibility**: Supports any business model requiring guest checkout
+
+## Tax Rates System (Optional)
+
+### Tax Rates
+
+```sql
+CREATE TABLE tax_rates (
+    id VARCHAR(255) PRIMARY KEY,
+
+    -- Basic tax information
+    name VARCHAR(255) NOT NULL, -- "Sales Tax", "IVA", "GST", "VAT"
+    description TEXT, -- Detailed description
+    rate DECIMAL(5,4) NOT NULL, -- Tax rate (0.0360 = 3.6%)
+    type VARCHAR(50) NOT NULL DEFAULT 'percentage', -- 'percentage', 'fixed_amount'
+
+    -- Geographic applicability
+    country VARCHAR(2), -- 'US', 'MX', 'ES', 'CA'
+    state_province VARCHAR(50), -- 'CA', 'TX', 'CDMX', 'ON'
+    city VARCHAR(100), -- 'New York', 'Los Angeles'
+    postal_code VARCHAR(20), -- Specific postal codes
+
+    -- Product/Category applicability (optional filters)
+    applicable_categories JSON, -- Array of category_ids ["clothing", "electronics"]
+    applicable_product_types JSON, -- Array of product_types ["physical", "digital"]
+    excluded_categories JSON, -- Array of excluded category_ids
+    excluded_product_types JSON, -- Array of excluded product_types
+
+    -- Configuration
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    priority INTEGER DEFAULT 0, -- Higher priority wins in conflicts
+    effective_from TIMESTAMP, -- When this rate becomes effective
+    effective_until TIMESTAMP, -- When this rate expires
+
+    -- Additional data
+    metadata JSON, -- Additional tax configuration
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_by VARCHAR(255), -- User who created this rate
+
+    -- Validations
+    CHECK (rate >= 0),
+    CHECK (type IN ('percentage', 'fixed_amount')),
+    CHECK (priority >= 0),
+    CHECK (effective_from IS NULL OR effective_until IS NULL OR effective_from < effective_until)
+);
+```
+
+**Key Features:**
+- **Dynamic Tax Calculation**: Tax rates calculated at purchase time based on location and product category
+- **Geographic Targeting**: Support for country, state/province, city, and postal code specific rates
+- **Product Category Filtering**: Apply different tax rates to different product categories
+- **Priority System**: Handle overlapping tax rules with priority-based resolution
+- **Time-based Activation**: Tax rates can be scheduled to activate/deactivate at specific times
+- **Flexible Configuration**: Support for both percentage and fixed amount taxes
+
+**Usage Examples:**
+```sql
+-- California Sales Tax (8.75%)
+INSERT INTO tax_rates (name, rate, country, state_province)
+VALUES ('California Sales Tax', 0.0875, 'US', 'CA');
+
+-- NYC Clothing Tax (4% for clothing only)
+INSERT INTO tax_rates (name, rate, country, state_province, city, applicable_categories)
+VALUES ('NYC Clothing Tax', 0.0400, 'US', 'NY', 'New York', '["clothing", "accessories"]');
+
+-- European VAT (21%)
+INSERT INTO tax_rates (name, rate, country)
+VALUES ('Spain VAT', 0.2100, 'ES');
+```
+
+**Dynamic Tax Calculation Flow:**
+1. **Product Selection**: User adds T-shirt (category: "clothing") to cart
+2. **Location Detection**: System detects user location (e.g., California, US)
+3. **Tax Rate Resolution**: Query tax_rates table for applicable rates
+4. **Priority Resolution**: If multiple rates match, use highest priority
+5. **Tax Calculation**: Apply rate to product subtotal_cents
+6. **Order Creation**: Store calculated tax_cents in order/payment

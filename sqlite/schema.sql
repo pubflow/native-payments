@@ -284,14 +284,17 @@ BEGIN
     UPDATE product_categories SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- Products/Plans
+-- Products/Plans (Products only have base price - tax calculated dynamically at purchase)
 CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     product_type TEXT NOT NULL, -- 'physical', 'digital', 'service', 'subscription'
     is_recurring INTEGER NOT NULL DEFAULT 0,
-    price_cents INTEGER NOT NULL,
+
+    -- PRODUCT PRICING (only base price - tax calculated dynamically)
+    subtotal_cents INTEGER NOT NULL, -- Base product price (before tax/discounts)
+
     currency TEXT NOT NULL DEFAULT 'USD',
     billing_interval TEXT, -- 'monthly', 'yearly', null for one-time
     trial_days INTEGER DEFAULT 0,
@@ -343,7 +346,8 @@ CREATE TABLE IF NOT EXISTS orders (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1) -- Must belong to a user, organization, customer, or be an anonymous guest order
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1), -- Must belong to a user, organization, customer, or be an anonymous guest order
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
 -- Trigger for updated_at on orders
@@ -381,7 +385,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     current_period_end TEXT NOT NULL,
     cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
     trial_end TEXT,
-    price_cents INTEGER NOT NULL,
+
+    -- NEW UNIFIED PRICING SYSTEM
+    subtotal_cents INTEGER NOT NULL, -- Base subscription price
+    tax_cents INTEGER NOT NULL DEFAULT 0, -- Applied taxes
+    discount_cents INTEGER NOT NULL DEFAULT 0, -- Applied discounts
+    total_cents INTEGER NOT NULL, -- Final subscription price (subtotal + tax - discount)
+
     currency TEXT NOT NULL DEFAULT 'USD',
     -- Billing automation fields
     billing_interval TEXT NOT NULL DEFAULT 'monthly', -- 'daily', 'weekly', 'monthly', 'yearly'
@@ -415,7 +425,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_subscription = 1), -- Must belong to a user, organization, have a customer, or be guest subscription
     CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly')),
     CHECK (interval_multiplier IS NULL OR (interval_multiplier > 0 AND interval_multiplier <= 12)),
-    CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled'))
+    CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled')),
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
 -- Trigger for updated_at on subscriptions
@@ -425,7 +436,7 @@ BEGIN
     UPDATE subscriptions SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- Payments (Enhanced with guest checkout support and payment intent functionality)
+-- Payments (Enhanced with financial breakdown and custom payment support)
 CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY,
     order_id TEXT,
@@ -433,34 +444,58 @@ CREATE TABLE IF NOT EXISTS payments (
     user_id TEXT, -- Made optional for guest checkout
     organization_id TEXT,
     payment_method_id TEXT,
-    provider_id TEXT NOT NULL,
+    provider_id TEXT, -- Made optional for custom payments
     provider_payment_id TEXT, -- Final payment ID from provider
     provider_intent_id TEXT, -- Intent ID from provider (e.g., Stripe payment intent)
     client_secret TEXT, -- Client secret for frontend confirmation
-    amount_cents INTEGER NOT NULL,
+
+    -- NEW UNIFIED PRICING SYSTEM
+    subtotal_cents INTEGER NOT NULL, -- Base amount before taxes and discounts
+    tax_cents INTEGER NOT NULL DEFAULT 0, -- Applied taxes
+    discount_cents INTEGER NOT NULL DEFAULT 0, -- Applied discounts
+    total_cents INTEGER NOT NULL, -- Final amount (subtotal + tax - discount)
+
     currency TEXT NOT NULL DEFAULT 'USD',
     status TEXT NOT NULL, -- 'pending', 'requires_confirmation', 'requires_action', 'processing', 'succeeded', 'failed', 'refunded'
     description TEXT,
     error_message TEXT,
+
     -- Enhanced tracking fields
     concept TEXT, -- Human-readable concept (e.g., "Monthly Subscription", "Product Purchase", "Donation")
-    reference_code TEXT, -- Machine-readable code for analytics (e.g., "subscription_monthly", "donation_campaign_2024")
+    reference_code TEXT, -- Machine-readable code for analytics and payment links
     category TEXT, -- High-level category (e.g., "subscription", "donation", "purchase", "refund", "fee")
-    tags TEXT, -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount")
+    tags TEXT, -- Comma-separated tags for flexible categorization
+
+    -- Custom/Manual payment support
+    is_manual_payment INTEGER NOT NULL DEFAULT 0, -- For manual/legacy payments
+    manual_payment_method TEXT, -- 'cash', 'check', 'bank_transfer', 'legacy_system'
+    manual_payment_reference TEXT, -- Reference for manual payment
+    manual_payment_date TEXT, -- Actual date of manual payment
+
+    -- Guest support
     is_guest_payment INTEGER NOT NULL DEFAULT 0, -- Track if this was a guest payment (0 = false, 1 = true)
     guest_data TEXT, -- JSON string with guest information (email, name, phone, etc.)
     guest_email TEXT, -- Extracted guest email for indexing and queries
+
+    -- Coupon tracking
+    applied_coupons TEXT, -- JSON string of applied coupons with details
+
     metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
+
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest_payment = 1) -- Must belong to a user, organization, or be guest payment
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest_payment = 1),
+    -- Allow direct payments (donations), order payments, subscription payments, or manual payments
+    CHECK (order_id IS NOT NULL OR subscription_id IS NOT NULL OR is_manual_payment = 1 OR (order_id IS NULL AND subscription_id IS NULL)),
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
 -- Trigger for updated_at on payments
@@ -470,37 +505,66 @@ BEGIN
     UPDATE payments SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- Invoices
+-- Invoices (Enhanced with guest support and payment links)
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY,
     invoice_number TEXT UNIQUE NOT NULL,
     order_id TEXT,
     subscription_id TEXT,
+    payment_id TEXT, -- Optional reference to payment (updated after payment completion)
     user_id TEXT,
     organization_id TEXT,
     customer_id TEXT, -- References provider_customers table (supports both users and guests)
+
     status TEXT NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
-    amount_cents INTEGER NOT NULL,
-    tax_cents INTEGER NOT NULL DEFAULT 0,
-    discount_cents INTEGER NOT NULL DEFAULT 0,
-    total_cents INTEGER NOT NULL,
+
+    -- NEW UNIFIED PRICING SYSTEM (consistent with payments)
+    subtotal_cents INTEGER NOT NULL, -- Base amount before taxes and discounts
+    tax_cents INTEGER NOT NULL DEFAULT 0, -- Applied taxes
+    discount_cents INTEGER NOT NULL DEFAULT 0, -- Applied discounts
+    total_cents INTEGER NOT NULL, -- Final amount (subtotal + tax - discount)
+
     currency TEXT NOT NULL DEFAULT 'USD',
     issue_date TEXT NOT NULL,
     due_date TEXT NOT NULL,
     paid_date TEXT,
+
+    -- Enhanced guest invoice support
+    is_guest_invoice INTEGER NOT NULL DEFAULT 0,
+    guest_data TEXT, -- JSON string with guest information for invoices
+    guest_email TEXT, -- Extracted guest email for indexing
+
+    -- Payment link support
+    reference_code TEXT, -- For referencing specific payments
+    payment_link_url TEXT, -- Unique URL to pay this invoice
+    payment_link_expires_at TEXT, -- Payment link expiration
+
+    -- Payment method tracking (saved when payment is completed)
+    payment_method_id TEXT, -- Payment method used for this invoice (updated after payment)
+
     billing_address TEXT, -- JSON string
     provider_id TEXT,
     provider_invoice_id TEXT,
     invoice_url TEXT, -- Optional friendly URL to access the invoice
+
+    -- Coupon tracking
+    applied_coupons TEXT, -- JSON string of applied coupons to this invoice
+
+    metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL) -- Must belong to a user, organization, or have a customer
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_invoice = 1),
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
 -- Trigger for updated_at on invoices
@@ -718,3 +782,234 @@ CREATE INDEX idx_analytics_events_category ON analytics_events(event_category);
 
 CREATE INDEX idx_user_cohorts_month ON user_cohorts(cohort_month);
 CREATE INDEX idx_user_cohorts_type ON user_cohorts(cohort_type);
+
+-- ========================================
+-- DISCOUNT COUPONS SYSTEM
+-- ========================================
+
+-- Discount Coupons
+CREATE TABLE IF NOT EXISTS discount_coupons (
+    id TEXT PRIMARY KEY,
+
+    -- Basic coupon information
+    code TEXT UNIQUE NOT NULL, -- Unique coupon code (e.g., "SUMMER2024", "WELCOME10")
+    name TEXT NOT NULL, -- Friendly name (e.g., "Summer Discount 2024")
+    description TEXT, -- Detailed description of the coupon
+
+    -- Discount type and value
+    discount_type TEXT NOT NULL, -- 'percentage', 'fixed_amount', 'free_shipping', 'buy_x_get_y'
+    discount_value REAL NOT NULL, -- Discount value (percentage or fixed amount)
+    currency TEXT DEFAULT 'USD', -- Currency for fixed amount discounts
+
+    -- Limits and restrictions
+    minimum_amount_cents INTEGER DEFAULT 0, -- Minimum amount to apply coupon
+    maximum_discount_cents INTEGER, -- Maximum discount (useful for percentages)
+    usage_limit INTEGER, -- Total usage limit (NULL = unlimited)
+    usage_limit_per_customer INTEGER, -- Limit per customer (NULL = unlimited per customer)
+    current_usage_count INTEGER NOT NULL DEFAULT 0, -- Current usage counter
+
+    -- Validity dates
+    starts_at TEXT, -- Start date (NULL = immediate)
+    expires_at TEXT, -- Expiration date (NULL = no expiration)
+
+    -- Applicability restrictions
+    applicable_to TEXT NOT NULL DEFAULT 'all', -- 'all', 'products', 'categories', 'subscriptions'
+    applicable_product_ids TEXT, -- JSON string of specific product IDs
+    applicable_category_ids TEXT, -- JSON string of specific category IDs
+    excluded_product_ids TEXT, -- JSON string of excluded product IDs
+
+    -- User restrictions
+    applicable_user_types TEXT, -- JSON string of user types ('individual', 'business', etc.)
+    applicable_customer_segments TEXT, -- JSON string of customer segments
+    first_time_customers_only INTEGER NOT NULL DEFAULT 0, -- Only for new customers
+
+    -- State and configuration
+    is_active INTEGER NOT NULL DEFAULT 1,
+    is_stackable INTEGER NOT NULL DEFAULT 0, -- Can be combined with other coupons
+    auto_apply INTEGER NOT NULL DEFAULT 0, -- Automatically applied if conditions are met
+
+    -- Tracking and analytics
+    campaign_id TEXT, -- Marketing campaign ID
+    source TEXT, -- Coupon source ('email', 'social', 'affiliate', etc.)
+    tags TEXT, -- Tags for flexible categorization
+
+    -- Advanced configuration
+    buy_x_get_y_config TEXT, -- JSON string for "buy X get Y" offers
+    tier_discounts TEXT, -- JSON string for tiered discounts
+
+    metadata TEXT, -- JSON string for additional metadata
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_by TEXT, -- User who created the coupon
+
+    CHECK (discount_type IN ('percentage', 'fixed_amount', 'free_shipping', 'buy_x_get_y')),
+    CHECK (applicable_to IN ('all', 'products', 'categories', 'subscriptions')),
+    CHECK (discount_value >= 0),
+    CHECK (usage_limit IS NULL OR usage_limit > 0),
+    CHECK (usage_limit_per_customer IS NULL OR usage_limit_per_customer > 0),
+    CHECK (current_usage_count >= 0)
+);
+
+-- Trigger for updated_at on discount_coupons
+CREATE TRIGGER IF NOT EXISTS update_discount_coupons_timestamp
+AFTER UPDATE ON discount_coupons
+BEGIN
+    UPDATE discount_coupons SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Coupon Usage Tracking
+CREATE TABLE IF NOT EXISTS coupon_usage (
+    id TEXT PRIMARY KEY,
+    coupon_id TEXT NOT NULL,
+
+    -- Who used the coupon
+    user_id TEXT,
+    customer_id TEXT, -- For guests
+    guest_email TEXT, -- For anonymous guests
+
+    -- Where it was used
+    order_id TEXT,
+    subscription_id TEXT,
+    payment_id TEXT,
+    invoice_id TEXT,
+
+    -- Usage details
+    discount_amount_cents INTEGER NOT NULL, -- Actual discount applied
+    original_amount_cents INTEGER NOT NULL, -- Original amount before discount
+    final_amount_cents INTEGER NOT NULL, -- Final amount after discount
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Usage metadata
+    usage_context TEXT, -- JSON string for additional context of usage
+    ip_address TEXT, -- IP address (for fraud detection)
+    user_agent TEXT, -- User agent (for analytics)
+
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    FOREIGN KEY (coupon_id) REFERENCES discount_coupons(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR customer_id IS NOT NULL OR guest_email IS NOT NULL),
+    CHECK (order_id IS NOT NULL OR subscription_id IS NOT NULL OR payment_id IS NOT NULL OR invoice_id IS NOT NULL)
+);
+
+-- ========================================
+-- TAX RATES SYSTEM (OPTIONAL)
+-- ========================================
+
+-- Tax Rates (Optional system for dynamic tax calculation)
+CREATE TABLE IF NOT EXISTS tax_rates (
+    id TEXT PRIMARY KEY,
+
+    -- Basic tax information
+    name TEXT NOT NULL, -- "Sales Tax", "IVA", "GST", "VAT"
+    description TEXT, -- Detailed description
+    rate REAL NOT NULL, -- Tax rate (0.0360 = 3.6%)
+    type TEXT NOT NULL DEFAULT 'percentage', -- 'percentage', 'fixed_amount'
+
+    -- Geographic applicability
+    country TEXT, -- 'US', 'MX', 'ES', 'CA'
+    state_province TEXT, -- 'CA', 'TX', 'CDMX', 'ON'
+    city TEXT, -- 'New York', 'Los Angeles'
+    postal_code TEXT, -- Specific postal codes
+
+    -- Product/Category applicability (optional filters)
+    applicable_categories TEXT, -- JSON string of category_ids ["clothing", "electronics"]
+    applicable_product_types TEXT, -- JSON string of product_types ["physical", "digital"]
+    excluded_categories TEXT, -- JSON string of excluded category_ids
+    excluded_product_types TEXT, -- JSON string of excluded product_types
+
+    -- Configuration
+    is_active INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER DEFAULT 0, -- Higher priority wins in conflicts
+    effective_from TEXT, -- When this rate becomes effective
+    effective_until TEXT, -- When this rate expires
+
+    -- Additional data
+    metadata TEXT, -- JSON string for additional tax configuration
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_by TEXT, -- User who created this rate
+
+    -- Validations
+    CHECK (rate >= 0),
+    CHECK (type IN ('percentage', 'fixed_amount')),
+    CHECK (priority >= 0)
+);
+
+-- Trigger for updated_at on tax_rates
+CREATE TRIGGER IF NOT EXISTS update_tax_rates_timestamp
+AFTER UPDATE ON tax_rates
+BEGIN
+    UPDATE tax_rates SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Coupon system indexes
+CREATE INDEX idx_discount_coupons_code ON discount_coupons(code);
+CREATE INDEX idx_discount_coupons_active ON discount_coupons(is_active);
+CREATE INDEX idx_discount_coupons_expires_at ON discount_coupons(expires_at);
+CREATE INDEX idx_discount_coupons_campaign ON discount_coupons(campaign_id);
+CREATE INDEX idx_discount_coupons_type ON discount_coupons(discount_type);
+CREATE INDEX idx_discount_coupons_usage ON discount_coupons(current_usage_count, usage_limit);
+CREATE INDEX idx_discount_coupons_applicable ON discount_coupons(applicable_to);
+
+CREATE INDEX idx_coupon_usage_coupon_id ON coupon_usage(coupon_id);
+CREATE INDEX idx_coupon_usage_user_id ON coupon_usage(user_id);
+CREATE INDEX idx_coupon_usage_guest_email ON coupon_usage(guest_email);
+CREATE INDEX idx_coupon_usage_amount ON coupon_usage(discount_amount_cents, currency);
+CREATE INDEX idx_coupon_usage_date ON coupon_usage(created_at);
+
+-- ========================================
+-- OPTIMIZED INDEXES FOR PRODUCTS TABLE
+-- ========================================
+
+-- Primary functional indexes
+CREATE INDEX idx_products_is_active ON products(is_active);
+CREATE INDEX idx_products_product_type ON products(product_type);
+CREATE INDEX idx_products_is_recurring ON products(is_recurring);
+CREATE INDEX idx_products_category_id ON products(category_id);
+CREATE INDEX idx_products_parent_product_id ON products(parent_product_id);
+
+-- Pricing and financial indexes
+CREATE INDEX idx_products_subtotal_cents ON products(subtotal_cents);
+CREATE INDEX idx_products_currency ON products(currency);
+CREATE INDEX idx_products_billing_interval ON products(billing_interval);
+CREATE INDEX idx_products_trial_days ON products(trial_days);
+
+-- Search and content indexes
+CREATE INDEX idx_products_name_search ON products(name);
+CREATE INDEX idx_products_description_search ON products(description);
+
+-- Temporal indexes for analytics and maintenance
+CREATE INDEX idx_products_created_at ON products(created_at);
+CREATE INDEX idx_products_updated_at ON products(updated_at);
+
+-- Composite indexes for common query patterns
+CREATE INDEX idx_products_active_type ON products(is_active, product_type);
+CREATE INDEX idx_products_active_recurring ON products(is_active, is_recurring);
+CREATE INDEX idx_products_active_category ON products(is_active, category_id);
+CREATE INDEX idx_products_type_recurring ON products(product_type, is_recurring);
+CREATE INDEX idx_products_active_price ON products(is_active, subtotal_cents);
+CREATE INDEX idx_products_category_price ON products(category_id, subtotal_cents);
+CREATE INDEX idx_products_currency_price ON products(currency, subtotal_cents);
+
+-- Advanced composite indexes for complex queries
+CREATE INDEX idx_products_active_type_price ON products(is_active, product_type, subtotal_cents);
+CREATE INDEX idx_products_active_recurring_price ON products(is_active, is_recurring, subtotal_cents);
+CREATE INDEX idx_products_category_type_price ON products(category_id, product_type, subtotal_cents);
+
+-- Subscription-specific indexes
+CREATE INDEX idx_products_subscription_billing ON products(is_recurring, billing_interval, subtotal_cents);
+CREATE INDEX idx_products_subscription_trial ON products(is_recurring, trial_days, subtotal_cents);
+
+-- Tax rates indexes
+CREATE INDEX idx_tax_rates_active ON tax_rates(is_active);
+CREATE INDEX idx_tax_rates_location ON tax_rates(country, state_province, city);
+CREATE INDEX idx_tax_rates_priority ON tax_rates(priority DESC);
+CREATE INDEX idx_tax_rates_effective ON tax_rates(effective_from, effective_until);
+CREATE INDEX idx_tax_rates_type ON tax_rates(type);

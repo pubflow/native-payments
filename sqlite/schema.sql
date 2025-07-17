@@ -162,10 +162,11 @@ CREATE TABLE IF NOT EXISTS addresses (
     country TEXT NOT NULL, -- ISO 2-letter country code
     phone TEXT,
     email TEXT,
+    alias TEXT, -- User-friendly name for the address (e.g., "Home", "Office", "Mom's house")
     is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest address (0 = false, 1 = true)
     guest_email TEXT, -- Email for guest addresses (for identification)
     guest_name TEXT, -- Name for guest addresses
-    metadata TEXT, -- JSON string for additional address information (e.g., nickname, category, notes)
+    metadata TEXT, -- JSON string for additional address information (e.g., category, notes)
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -243,10 +244,11 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     card_brand TEXT, -- 'visa', 'mastercard', etc.
     is_default INTEGER NOT NULL DEFAULT 0,
     billing_address_id TEXT,
+    alias TEXT, -- User-friendly name for the payment method (e.g., "My primary card", "Travel card")
     is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest payment method (0 = false, 1 = true)
     guest_email TEXT, -- Email for guest payment methods (for identification)
     guest_name TEXT, -- Name for guest payment methods
-    metadata TEXT, -- JSON string for additional payment method information (e.g., nickname, category)
+    metadata TEXT, -- JSON string for additional payment method information (e.g., category, notes)
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -658,6 +660,7 @@ CREATE INDEX idx_addresses_address_type ON addresses(address_type);
 CREATE INDEX idx_addresses_is_guest ON addresses(is_guest);
 CREATE INDEX idx_addresses_guest_email ON addresses(guest_email);
 CREATE INDEX idx_addresses_is_default ON addresses(is_default);
+CREATE INDEX idx_addresses_alias ON addresses(alias) WHERE alias IS NOT NULL;
 
 CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
 CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
@@ -668,6 +671,7 @@ CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
 CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
+CREATE INDEX idx_payment_methods_alias ON payment_methods(alias) WHERE alias IS NOT NULL;
 
 CREATE INDEX idx_orders_user_id ON orders(user_id);
 CREATE INDEX idx_orders_organization_id ON orders(organization_id);

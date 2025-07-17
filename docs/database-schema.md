@@ -353,10 +353,11 @@ CREATE TABLE addresses (
     country VARCHAR(2) NOT NULL, -- ISO 2-letter country code
     phone VARCHAR(50),
     email VARCHAR(255),
+    alias VARCHAR(255), -- User-friendly name for the address (e.g., "Home", "Office", "Mom's house")
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest address
     guest_email VARCHAR(255), -- Email for guest addresses (for identification)
     guest_name VARCHAR(255), -- Name for guest addresses
-    metadata JSON, -- JSON object for additional address information (e.g., nickname, category, notes)
+    metadata JSON, -- JSON object for additional address information (e.g., category, notes)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -370,6 +371,7 @@ CREATE TABLE addresses (
 - Can belong to users, organizations, or guests
 - ISO country code standardization
 - Default address selection
+- `alias`: User-friendly name for easy identification (e.g., "Home", "Office", "Mom's house")
 - `is_guest`: Boolean flag to identify guest addresses
 - `guest_email`: Email for guest address identification and management
 - `guest_name`: Display name for guest addresses
@@ -447,10 +449,11 @@ CREATE TABLE payment_methods (
     card_brand VARCHAR(50), -- 'visa', 'mastercard', etc.
     is_default BOOLEAN NOT NULL DEFAULT false,
     billing_address_id VARCHAR(255),
+    alias VARCHAR(255), -- User-friendly name for the payment method (e.g., "My primary card", "Travel card")
     is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest payment method
     guest_email VARCHAR(255), -- Email for guest payment methods (for identification)
     guest_name VARCHAR(255), -- Name for guest payment methods
-    metadata JSON, -- JSON object for additional payment method information (e.g., nickname, category)
+    metadata JSON, -- JSON object for additional payment method information (e.g., category, notes)
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -466,6 +469,7 @@ CREATE TABLE payment_methods (
 - Supports multiple payment types (cards, bank accounts, digital wallets)
 - Provider-agnostic design with provider-specific IDs
 - `wallet_type`: Specifies the type of wallet payment (apple_pay, google_pay, samsung_pay, etc.) when payment_type is 'wallet'
+- `alias`: User-friendly name for easy identification (e.g., "My primary card", "Travel card", "Business expenses")
 - `is_guest`: Boolean flag to identify guest payment methods
 - `guest_email`: Email for guest payment method identification and management
 - `guest_name`: Name for guest payment methods
@@ -1085,11 +1089,13 @@ CREATE INDEX idx_users_user_name ON users(user_name);
 CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
 CREATE INDEX idx_addresses_type ON addresses(address_type);
+CREATE INDEX idx_addresses_alias ON addresses(alias);
 
 -- Payment method lookups
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
 CREATE INDEX idx_payment_methods_provider_id ON payment_methods(provider_id);
+CREATE INDEX idx_payment_methods_alias ON payment_methods(alias);
 
 -- Order and payment tracking
 CREATE INDEX idx_orders_status ON orders(status);

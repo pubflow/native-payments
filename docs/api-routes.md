@@ -101,6 +101,7 @@ POST /api/payment/methods
   "provider_id": "stripe",              // Required
   "payment_type": "credit_card",        // Required: credit_card, bank_account, etc.
   "token": "tok_visa",                  // Provider-specific token from frontend
+  "alias": "My primary card",           // Optional: User-friendly name for the payment method
   "is_default": true,                   // Optional
   "billing_address": {                  // Optional
     "line1": "123 Main St",
@@ -123,6 +124,7 @@ POST /api/payment/methods
   "expiry_month": "12",
   "expiry_year": "2025",
   "card_brand": "visa",
+  "alias": "My primary card",
   "is_default": true,
   "created_at": "2023-06-15T10:35:00Z"
 }
@@ -149,11 +151,44 @@ GET /api/payment/methods?organization_id=org_456
       "expiry_month": "12",
       "expiry_year": "2025",
       "card_brand": "visa",
+      "alias": "My primary card",
       "is_default": true,
       "created_at": "2023-06-15T10:35:00Z"
     }
   ],
   "total": 1
+}
+```
+
+### Update Payment Method
+
+Updates a payment method's local fields (nickname, default status, etc.).
+
+```
+PUT /api/payment/methods/:id
+```
+
+**Request Body:**
+```json
+{
+  "alias": "Updated card name",         // Optional: User-friendly name
+  "is_default": true                    // Optional: Set as default payment method
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "id": "pm_internal_123",
+  "provider_id": "stripe",
+  "payment_type": "credit_card",
+  "last_four": "4242",
+  "expiry_month": "12",
+  "expiry_year": "2025",
+  "card_brand": "visa",
+  "alias": "Updated card name",
+  "is_default": true,
+  "updated_at": "2023-06-15T11:00:00Z"
 }
 ```
 

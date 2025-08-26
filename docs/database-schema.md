@@ -441,6 +441,7 @@ CREATE TABLE payment_methods (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_payment_method_id VARCHAR(255) NOT NULL, -- ID from the provider
+    provider_customer_id VARCHAR(255), -- Direct link to provider_customers.id for better performance
     payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
     wallet_type VARCHAR(50), -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four VARCHAR(4), -- Last 4 digits of card or account
@@ -459,6 +460,7 @@ CREATE TABLE payment_methods (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
+    FOREIGN KEY (provider_customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
@@ -468,6 +470,7 @@ CREATE TABLE payment_methods (
 - Links to addresses table for billing information
 - Supports multiple payment types (cards, bank accounts, digital wallets)
 - Provider-agnostic design with provider-specific IDs
+- `provider_customer_id`: Direct link to provider_customers table for improved performance and data consistency
 - `wallet_type`: Specifies the type of wallet payment (apple_pay, google_pay, samsung_pay, etc.) when payment_type is 'wallet'
 - `alias`: User-friendly name for easy identification (e.g., "My primary card", "Travel card", "Business expenses")
 - `is_guest`: Boolean flag to identify guest payment methods
@@ -1095,6 +1098,7 @@ CREATE INDEX idx_addresses_alias ON addresses(alias);
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
 CREATE INDEX idx_payment_methods_provider_id ON payment_methods(provider_id);
+CREATE INDEX idx_payment_methods_provider_customer_id ON payment_methods(provider_customer_id);
 CREATE INDEX idx_payment_methods_alias ON payment_methods(alias);
 
 -- Order and payment tracking

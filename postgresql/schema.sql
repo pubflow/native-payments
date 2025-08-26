@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_payment_method_id VARCHAR(255) NOT NULL, -- ID from the provider
+    provider_customer_id VARCHAR(255), -- Direct link to provider_customers.id for better performance
     payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
     wallet_type VARCHAR(50), -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four VARCHAR(4), -- Last 4 digits of card or account
@@ -245,6 +246,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
+    FOREIGN KEY (provider_customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
@@ -641,6 +643,7 @@ CREATE INDEX idx_provider_customers_guest_email ON provider_customers(guest_emai
 
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
+CREATE INDEX idx_payment_methods_provider_customer_id ON payment_methods(provider_customer_id);
 CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
 CREATE INDEX idx_payment_methods_alias ON payment_methods(alias);

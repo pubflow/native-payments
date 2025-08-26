@@ -202,31 +202,57 @@ BEGIN
     UPDATE payment_providers SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- Provider Customers
-CREATE TABLE IF NOT EXISTS provider_customers (
+-- External Entities (Unified Entity Management with Hierarchical Relationships)
+CREATE TABLE IF NOT EXISTS external_entities (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
-    provider_id TEXT NOT NULL,
-    provider_customer_id TEXT NOT NULL, -- ID from the provider (e.g., Stripe customer ID)
-    guest_email TEXT, -- Email for guest customers
-    guest_name TEXT, -- Name for guest customers
-    is_guest INTEGER NOT NULL DEFAULT 0, -- Indicates if this is a guest customer (0 = false, 1 = true)
-    metadata TEXT, -- JSON string
+
+    -- CONTEXT FIELDS (primary classification)
+    context_type TEXT NOT NULL DEFAULT 'payment',  -- 'payment', 'newsletter', 'events', etc.
+    context_id TEXT,                 -- Specific context identifier (optional)
+
+    -- PAYMENT FIELDS (optional, only for payment contexts)
+    payment_provider_id TEXT,        -- References payment_providers.id (optional)
+    payment_provider_customer_id TEXT, -- External provider customer ID (optional)
+
+    -- ENTITY RELATIONSHIPS
+    provider_entity_id TEXT,         -- Reference to another entity in same table
+
+    -- ENTITY DATA
+    is_external INTEGER NOT NULL DEFAULT 1,  -- 1 for external, 0 for registered users
+    external_email TEXT,             -- Clean semantic naming
+    external_name TEXT,              -- Clean semantic naming
+    external_phone TEXT,             -- Optional phone
+    external_alias TEXT,             -- Optional alias/nickname
+
+    metadata TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    -- FOREIGN KEYS WITH PROPER REFERENCES
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    UNIQUE (provider_id, provider_customer_id),
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
+    FOREIGN KEY (payment_provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
+    FOREIGN KEY (provider_entity_id) REFERENCES external_entities(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR external_email IS NOT NULL) -- Either user_id or external_email must be provided
 );
 
--- Trigger for updated_at on provider_customers
-CREATE TRIGGER IF NOT EXISTS update_provider_customers_timestamp
-AFTER UPDATE ON provider_customers
+-- Create partial unique indexes to enforce conditional uniqueness
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_entities_user_unique
+ON external_entities (user_id, organization_id, payment_provider_id, context_type)
+WHERE user_id IS NOT NULL AND payment_provider_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_entities_email_unique
+ON external_entities (external_email, organization_id, payment_provider_id, context_type)
+WHERE user_id IS NULL AND external_email IS NOT NULL AND payment_provider_id IS NOT NULL;
+
+-- Trigger for updated_at on external_entities
+CREATE TRIGGER IF NOT EXISTS update_external_entities_timestamp
+AFTER UPDATE ON external_entities
 BEGIN
-    UPDATE provider_customers SET updated_at = datetime('now') WHERE id = NEW.id;
+    UPDATE external_entities SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
 -- Payment Methods
@@ -236,7 +262,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     organization_id TEXT,
     provider_id TEXT NOT NULL,
     provider_payment_method_id TEXT NOT NULL, -- ID from the provider
-    provider_customer_id TEXT, -- Direct link to provider_customers.id for better performance
+    customer_id TEXT, -- Direct link to external_entities.id for better performance
     payment_type TEXT NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
     wallet_type TEXT, -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four TEXT, -- Last 4 digits of card or account
@@ -255,7 +281,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
 );
@@ -328,7 +354,7 @@ CREATE TABLE IF NOT EXISTS orders (
     order_number TEXT UNIQUE NOT NULL, -- Human-readable order number
     user_id TEXT,
     organization_id TEXT,
-    customer_id TEXT, -- References provider_customers table (supports registered guests)
+    customer_id TEXT, -- References external_entities table (supports registered guests)
 
     -- Anonymous guest support
     is_guest_order INTEGER NOT NULL DEFAULT 0, -- Track if this was an anonymous guest order (0 = false, 1 = true)
@@ -349,7 +375,7 @@ CREATE TABLE IF NOT EXISTS orders (
     completed_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1), -- Must belong to a user, organization, customer, or be an anonymous guest order
     CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
@@ -379,7 +405,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
-    customer_id TEXT NOT NULL, -- References provider_customers table (supports both users and guests)
+    customer_id TEXT NOT NULL, -- References external_entities table (supports both users and guests)
     product_id TEXT, -- Optional for custom donations/flexible subscriptions
     payment_method_id TEXT,
     provider_id TEXT NOT NULL,
@@ -422,7 +448,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     guest_email TEXT, -- Extracted guest email for indexing and queries
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
@@ -518,7 +544,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     payment_id TEXT, -- Optional reference to payment (updated after payment completion)
     user_id TEXT,
     organization_id TEXT,
-    customer_id TEXT, -- References provider_customers table (supports both users and guests)
+    customer_id TEXT, -- References external_entities table (supports both users and guests)
 
     status TEXT NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
 
@@ -563,7 +589,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
 
@@ -664,14 +690,20 @@ CREATE INDEX idx_addresses_guest_email ON addresses(guest_email);
 CREATE INDEX idx_addresses_is_default ON addresses(is_default);
 CREATE INDEX idx_addresses_alias ON addresses(alias) WHERE alias IS NOT NULL;
 
-CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
-CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
-CREATE INDEX idx_provider_customers_is_guest ON provider_customers(is_guest);
-CREATE INDEX idx_provider_customers_guest_email ON provider_customers(guest_email);
+-- External Entities Indexes
+CREATE INDEX idx_external_entities_user_id ON external_entities(user_id);
+CREATE INDEX idx_external_entities_organization_id ON external_entities(organization_id);
+CREATE INDEX idx_external_entities_context_type ON external_entities(context_type);
+CREATE INDEX idx_external_entities_payment_provider ON external_entities(payment_provider_id);
+CREATE INDEX idx_external_entities_is_external ON external_entities(is_external);
+CREATE INDEX idx_external_entities_external_email ON external_entities(external_email);
+CREATE INDEX idx_external_entities_provider_entity ON external_entities(provider_entity_id);
+CREATE INDEX idx_external_entities_context_email ON external_entities(context_type, external_email);
+CREATE INDEX idx_external_entities_hierarchy ON external_entities(provider_entity_id, context_type);
 
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
-CREATE INDEX idx_payment_methods_provider_customer_id ON payment_methods(provider_customer_id);
+CREATE INDEX idx_payment_methods_customer_id ON payment_methods(customer_id);
 CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
 CREATE INDEX idx_payment_methods_alias ON payment_methods(alias) WHERE alias IS NOT NULL;
@@ -895,7 +927,7 @@ CREATE TABLE IF NOT EXISTS coupon_usage (
 
     FOREIGN KEY (coupon_id) REFERENCES discount_coupons(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,

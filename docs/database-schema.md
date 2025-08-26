@@ -193,7 +193,7 @@ These tables will be **automatically deleted** when a user is removed:
 - `tokens` - Authentication tokens
 - `addresses` - User addresses
 - `payment_methods` - Saved payment methods
-- `provider_customers` - Provider customer records
+- `external_entities` - External entity records (payment customers, newsletter subscribers, etc.)
 - `organization_users` - Organization memberships
 - `subscriptions` - Active subscriptions
 - `user_memberships` - Membership records
@@ -403,34 +403,96 @@ CREATE TABLE payment_providers (
 - `config`: JSON field for provider-specific settings (API keys, etc.)
 - Feature flags for subscription and saved payment method support
 
-### Provider Customers
+### External Entities (Unified Customer Management)
 
 ```sql
-CREATE TABLE provider_customers (
+CREATE TABLE external_entities (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    provider_id VARCHAR(50) NOT NULL,
-    provider_customer_id VARCHAR(255) NOT NULL, -- ID from the provider (e.g., Stripe customer ID)
-    guest_email VARCHAR(255), -- Email for guest customers
-    guest_name VARCHAR(255), -- Name for guest customers
-    is_guest BOOLEAN NOT NULL DEFAULT false, -- Indicates if this is a guest customer
+
+    -- CONTEXT FIELDS (primary classification)
+    context_type VARCHAR(50) NOT NULL DEFAULT 'payment',  -- 'payment', 'newsletter', 'events', etc.
+    context_id VARCHAR(255),                 -- Specific context identifier (optional)
+
+    -- PAYMENT FIELDS (optional, only for payment contexts)
+    payment_provider_id VARCHAR(50),        -- References payment_providers.id (optional)
+    payment_provider_customer_id VARCHAR(255), -- External provider customer ID (optional)
+
+    -- ENTITY RELATIONSHIPS
+    provider_entity_id VARCHAR(255),         -- Reference to another entity in same table
+
+    -- ENTITY DATA
+    is_external BOOLEAN NOT NULL DEFAULT true,  -- true for external entities, false for registered users
+    external_email VARCHAR(255),             -- Clean semantic naming
+    external_name VARCHAR(255),              -- Clean semantic naming
+    external_phone VARCHAR(50),              -- Optional phone
+    external_alias VARCHAR(255),             -- Optional alias/nickname
+
     metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- FOREIGN KEYS WITH PROPER REFERENCES
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    UNIQUE KEY (provider_id, provider_customer_id),
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
+    FOREIGN KEY (payment_provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
+    FOREIGN KEY (provider_entity_id) REFERENCES external_entities(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR external_email IS NOT NULL) -- Either user_id or external_email must be provided
 );
+
+-- Create partial unique indexes to enforce conditional uniqueness
+CREATE UNIQUE INDEX idx_external_entities_user_unique
+ON external_entities (user_id, organization_id, payment_provider_id, context_type)
+WHERE user_id IS NOT NULL AND payment_provider_id IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_external_entities_email_unique
+ON external_entities (external_email, organization_id, payment_provider_id, context_type)
+WHERE user_id IS NULL AND external_email IS NOT NULL AND payment_provider_id IS NOT NULL;
 ```
 
 **Key Features:**
-- `guest_email`: Email address for guest customers who don't have user accounts
-- `guest_name`: Display name for guest customers
-- `is_guest`: Boolean flag to identify guest customers
-- Modified CHECK constraint to allow guest customers without user_id or organization_id
+- **Unified Entity Management**: Single table for payment customers, newsletter subscribers, event attendees, etc.
+- **Context-Based Classification**: `context_type` field enables multiple use cases beyond payments
+- **Hierarchical Relationships**: `provider_entity_id` creates parent-child entity relationships
+- **Scalable Design**: Supports future extensions (newsletter, events, contacts, surveys)
+- **Clean Semantics**: `external_*` fields provide clear, descriptive naming
+- **Payment-Optional**: Payment provider fields are optional for non-payment contexts
+- **Guest Support**: Complete support for external entities without user accounts
+- **Relationship Tracking**: Entities can be linked (e.g., guest → payment customer → newsletter subscriber)
+- **Performance Optimized**: Conditional unique indexes prevent duplicates while allowing flexibility
+
+**Hierarchical Design Patterns:**
+
+1. **Simple Pattern** (Single Context):
+   ```sql
+   -- Direct payment entity creation
+   INSERT INTO external_entities (context_type, payment_provider_id, external_email)
+   VALUES ('payment', 'stripe', 'guest@example.com');
+   ```
+
+2. **Hierarchical Pattern** (Multiple Contexts):
+   ```sql
+   -- 1. Create guest parent entity
+   INSERT INTO external_entities (context_type, external_email, external_name)
+   VALUES ('guest', 'user@example.com', 'John Doe');
+
+   -- 2. Create payment child entity
+   INSERT INTO external_entities (context_type, payment_provider_id, provider_entity_id, external_email)
+   VALUES ('payment', 'stripe', 'guest_entity_id', 'user@example.com');
+
+   -- 3. Create newsletter child entity
+   INSERT INTO external_entities (context_type, provider_entity_id, external_email)
+   VALUES ('newsletter', 'guest_entity_id', 'user@example.com');
+   ```
+
+3. **Cross-Context Relationships**:
+   ```sql
+   -- Newsletter subscriber becomes payment customer
+   INSERT INTO external_entities (context_type, payment_provider_id, provider_entity_id, external_email)
+   VALUES ('payment', 'stripe', 'newsletter_entity_id', 'user@example.com');
+   ```
 
 ### Payment Methods
 
@@ -441,7 +503,7 @@ CREATE TABLE payment_methods (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_payment_method_id VARCHAR(255) NOT NULL, -- ID from the provider
-    provider_customer_id VARCHAR(255), -- Direct link to provider_customers.id for better performance
+    customer_id VARCHAR(255), -- Direct link to external_entities.id for better performance
     payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
     wallet_type VARCHAR(50), -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four VARCHAR(4), -- Last 4 digits of card or account
@@ -460,7 +522,7 @@ CREATE TABLE payment_methods (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
@@ -470,7 +532,7 @@ CREATE TABLE payment_methods (
 - Links to addresses table for billing information
 - Supports multiple payment types (cards, bank accounts, digital wallets)
 - Provider-agnostic design with provider-specific IDs
-- `provider_customer_id`: Direct link to provider_customers table for improved performance and data consistency
+- `customer_id`: Direct link to external_entities table for improved performance and data consistency
 - `wallet_type`: Specifies the type of wallet payment (apple_pay, google_pay, samsung_pay, etc.) when payment_type is 'wallet'
 - `alias`: User-friendly name for easy identification (e.g., "My primary card", "Travel card", "Business expenses")
 - `is_guest`: Boolean flag to identify guest payment methods
@@ -553,7 +615,7 @@ CREATE TABLE orders (
     order_number VARCHAR(255) UNIQUE NOT NULL, -- Human-readable order number
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255), -- References provider_customers table (supports registered guests)
+    customer_id VARCHAR(255), -- References external_entities table (supports registered guests)
 
     -- Anonymous guest support
     is_guest_order BOOLEAN NOT NULL DEFAULT false, -- Track if this was an anonymous guest order
@@ -574,7 +636,7 @@ CREATE TABLE orders (
     completed_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (shipping_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = true) -- Must belong to a user, organization, customer, or be an anonymous guest order
@@ -596,7 +658,7 @@ CREATE TABLE order_items (
 
 **Key Features:**
 - **Complete Guest Support**: Supports both registered guests (`customer_id`) and anonymous guests (`is_guest_order`)
-- **Registered Guests**: Uses `customer_id` to reference `provider_customers` for guests who want to save payment methods
+- **Registered Guests**: Uses `customer_id` to reference `external_entities` for guests who want to save payment methods
 - **Anonymous Guests**: Uses `is_guest_order` flag with `guest_data` JSON for completely anonymous checkout
 - **Unified Customer Management**: Consistent with subscriptions and invoices design
 - **Flexible Ownership**: Can belong to users, organizations, registered guests, or anonymous guests
@@ -696,7 +758,7 @@ CREATE TABLE subscriptions (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255) NOT NULL, -- References provider_customers table (supports both users and guests)
+    customer_id VARCHAR(255) NOT NULL, -- References external_entities table (supports both users and guests)
     product_id VARCHAR(255), -- Optional for custom donations/flexible subscriptions
     payment_method_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
@@ -734,7 +796,7 @@ CREATE TABLE subscriptions (
     tags VARCHAR(500), -- Comma-separated tags for flexible categorization (e.g., "promotion,summer,discount,premium")
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
@@ -749,11 +811,11 @@ CREATE TABLE subscriptions (
 - **Guest Support**: `customer_id` field enables subscriptions for guests without user accounts
 - **Flexible Products**: `product_id` is optional for custom donations and flexible subscriptions
 - **Multipurpose Design**: Supports both predefined products and custom pricing
-- **Unified Customer Management**: Links to `provider_customers` table for both users and guests
+- **Unified Customer Management**: Links to `external_entities` table for both users and guests
 - **Enhanced Status**: Additional status values for incomplete payments
 - **Flexible Ownership**: Can belong to users, organizations, or guests
 - **Provider Agnostic**: Works with any payment provider
-- **Clean Design**: No duplicate guest fields - guest info comes from `provider_customers`
+- **Clean Design**: No duplicate guest fields - guest info comes from `external_entities`
 - **Automatic Billing**: Built-in support for automatic subscription renewals with flexible intervals
 - **Retry Logic**: Configurable retry attempts for failed billing with status tracking
 - **Flexible Intervals**: Support for custom billing frequencies using interval multipliers
@@ -942,7 +1004,7 @@ CREATE TABLE invoices (
     subscription_id VARCHAR(255),
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255), -- References provider_customers table (supports both users and guests)
+    customer_id VARCHAR(255), -- References external_entities table (supports both users and guests)
     status VARCHAR(50) NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
     amount_cents BIGINT NOT NULL,
     tax_cents BIGINT NOT NULL DEFAULT 0,
@@ -962,7 +1024,7 @@ CREATE TABLE invoices (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL) -- Must belong to a user, organization, or have a customer
@@ -971,7 +1033,7 @@ CREATE TABLE invoices (
 
 **Key Features:**
 - **Guest Support**: `customer_id` field enables invoices for guests without user accounts
-- **Unified Customer Management**: Links to `provider_customers` table for both users and guests
+- **Unified Customer Management**: Links to `external_entities` table for both users and guests
 - **Flexible Ownership**: Can belong to users, organizations, or guests
 - **Provider Integration**: Supports provider-generated invoices with external URLs
 - **Complete Audit Trail**: Tracks all invoice states and payment dates
@@ -1060,20 +1122,25 @@ CREATE TABLE user_memberships (
 ### Entity Relationship Overview
 
 1. **Users & Organizations**: Many-to-many relationship through `organization_users`
-2. **Provider Customers**: Unified customer management for users, organizations, and guests
-3. **Addresses**: Belong to users, organizations, or guests (via `is_guest` flag)
-4. **Payment Methods**: Linked to users/organizations/guests and addresses
-5. **Subscriptions**: Connected to customers via `customer_id` (supports guests seamlessly)
-6. **Orders**: Reference billing and shipping addresses
-7. **Memberships**: Tied to users and can be linked to subscriptions or orders
-8. **Products**: Organized in categories with support for variations
+2. **External Entities**: Hierarchical entity management with context-based classification
+   - **Guest Entities** (context_type='guest'): Parent entities for guest users
+   - **Payment Entities** (context_type='payment'): Child entities for payment processing
+   - **Newsletter Entities** (context_type='newsletter'): Child entities for subscriptions
+   - **Event Entities** (context_type='events'): Child entities for event management
+3. **Entity Relationships**: `provider_entity_id` creates parent-child relationships between entities
+4. **Addresses**: Belong to users, organizations, or external entities
+5. **Payment Methods**: Linked to payment entities (context_type='payment') via `customer_id`
+6. **Subscriptions**: Connected to payment entities via `customer_id` (supports guests seamlessly)
+7. **Orders**: Reference payment entities for billing and shipping addresses
+8. **Memberships**: Tied to users and can be linked to subscriptions or orders
+9. **Products**: Organized in categories with support for variations
 
 ### Key Design Principles
 
 1. **Multi-tenancy**: Support for individual users, organizations, and guests
 2. **Guest-Friendly**: Complete guest checkout and subscription support without requiring accounts
 3. **Provider Agnostic**: Works with multiple payment providers (Stripe, PayPal, Authorize.net)
-4. **Unified Customer Management**: Single `provider_customers` table handles all customer types
+4. **Unified Entity Management**: Single `external_entities` table handles all entity types with hierarchical relationships
 5. **Flexible Pricing**: Supports various business models (SaaS, eCommerce, memberships)
 6. **Audit Trail**: Comprehensive event and webhook logging
 7. **Data Integrity**: Proper foreign key constraints and optimized CHECK constraints
@@ -1225,32 +1292,52 @@ CREATE TABLE user_cohorts (
 
 The payment system provides comprehensive guest support, allowing users to make purchases and subscribe to services without creating accounts. This is achieved through a unified customer management approach.
 
-### Guest Customer Flow
+### Guest Entity Flow
 
 1. **Guest Checkout**: Guest provides email and basic info
-2. **Customer Creation**: Record created in `provider_customers` with `is_guest = true`
-3. **Payment Processing**: Normal payment flow using guest customer
-4. **Subscription Support**: Guests can subscribe to recurring services
-5. **Guest Conversion**: When guest registers, all data is seamlessly transferred
+2. **Entity Creation**:
+   - **Simple Case**: Payment entity created directly (context_type='payment')
+   - **Complex Case**: Guest entity created as parent (context_type='guest'), then payment entity as child
+3. **Payment Processing**: Normal payment flow using payment entity
+4. **Multi-Context Support**: Same guest can have newsletter, events, and other entities
+5. **Hierarchical Relationships**: All entities linked via `provider_entity_id`
+6. **Guest Conversion**: When guest registers, all related entities are seamlessly transferred
 
 ### Key Tables for Guest Support
 
-#### Provider Customers (Unified Customer Management)
+#### External Entities (Hierarchical Entity Management)
 ```sql
--- Handles both authenticated users and guests
-SELECT * FROM provider_customers WHERE is_guest = true;
+-- Get all guest entities (parent entities)
+SELECT * FROM external_entities WHERE context_type = 'guest';
+
+-- Get all payment entities for guests
+SELECT * FROM external_entities WHERE context_type = 'payment' AND is_external = true;
+
+-- Get all contexts for a specific guest
+SELECT
+  parent.external_name as guest_name,
+  parent.external_email as guest_email,
+  child.context_type,
+  child.context_id,
+  child.payment_provider_id
+FROM external_entities parent
+JOIN external_entities child ON child.provider_entity_id = parent.id
+WHERE parent.context_type = 'guest'
+AND parent.external_email = 'guest@example.com';
 ```
 
 #### Guest Subscriptions
 ```sql
--- Get all guest subscriptions with customer info
+-- Get all guest subscriptions with payment entity info
 SELECT
   s.*,
-  c.guest_email,
-  c.guest_name
+  pe.external_email,
+  pe.external_name,
+  ge.external_name as guest_name
 FROM subscriptions s
-JOIN provider_customers c ON s.customer_id = c.id
-WHERE c.is_guest = true;
+JOIN external_entities pe ON s.customer_id = pe.id
+LEFT JOIN external_entities ge ON pe.provider_entity_id = ge.id
+WHERE pe.context_type = 'payment' AND pe.is_external = true;
 ```
 
 #### Guest Payment Methods
@@ -1258,31 +1345,46 @@ WHERE c.is_guest = true;
 -- Get saved payment methods for guests
 SELECT
   pm.*,
-  c.guest_email
+  pe.external_email,
+  pe.external_name,
+  ge.external_name as guest_name
 FROM payment_methods pm
-JOIN provider_customers c ON pm.guest_email = c.guest_email
-WHERE pm.is_guest = true;
+JOIN external_entities pe ON pm.customer_id = pe.id
+LEFT JOIN external_entities ge ON pe.provider_entity_id = ge.id
+WHERE pe.context_type = 'payment' AND pe.is_external = true;
 ```
 
 ### Guest to User Conversion
 
 When a guest creates an account:
 
-1. **Update Customer Record**: Convert `is_guest = false`, add `user_id`
-2. **Update Subscriptions**: Link to `user_id`
-3. **Update Payment Methods**: Convert guest payment methods
-4. **Maintain History**: All transaction history is preserved
+1. **Update Entity Records**: Convert `is_external = false`, add `user_id` to all related entities
+2. **Update Subscriptions**: Link to `user_id` (automatic via foreign keys)
+3. **Update Payment Methods**: Link to `user_id` (automatic via foreign keys)
+4. **Maintain Relationships**: All entity relationships are preserved
+5. **Maintain History**: All transaction history is preserved
 
 ```sql
--- Example conversion process
-UPDATE provider_customers
-SET is_guest = false, user_id = 'new_user_123', guest_email = NULL
-WHERE guest_email = 'guest@example.com' AND is_guest = true;
+-- Example conversion process for hierarchical entities
+-- Update guest parent entity
+UPDATE external_entities
+SET is_external = false, user_id = 'new_user_123'
+WHERE external_email = 'guest@example.com' AND context_type = 'guest';
 
+-- Update all child entities (payment, newsletter, events, etc.)
+UPDATE external_entities
+SET is_external = false, user_id = 'new_user_123'
+WHERE provider_entity_id IN (
+  SELECT id FROM external_entities
+  WHERE user_id = 'new_user_123' AND context_type = 'guest'
+);
+
+-- Update subscriptions (automatic via customer_id relationship)
 UPDATE subscriptions
 SET user_id = 'new_user_123'
 WHERE customer_id IN (
-  SELECT id FROM provider_customers WHERE user_id = 'new_user_123'
+  SELECT id FROM external_entities
+  WHERE user_id = 'new_user_123' AND context_type = 'payment'
 );
 ```
 

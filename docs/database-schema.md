@@ -50,6 +50,13 @@ CREATE INDEX idx_token_type_status ON tokens(token_type, status);
 - **Simple Status Management**: Clear token lifecycle with status tracking
 - **Performance Optimized**: Strategic indexes for fast lookups and cleanup
 
+**Enhanced User Profile Features:**
+- **Extended Contact Information**: Primary phone, mobile, and recovery email support
+- **Rich Profile Data**: Display name, bio, gender (ISO 5218), date of birth, and timezone
+- **Global Localization**: Timezone-aware user profiles for international applications
+- **External Integration**: Reference ID field for linking with external systems
+- **Comprehensive Indexing**: Optimized indexes for all new profile fields
+
 **Security Recommendations:**
 - Always hash tokens before storing using a secure algorithm (e.g., SHA-256 with salt)
 - Set appropriate expiration times (5-15 minutes for magic links, 1 hour for password reset)
@@ -72,6 +79,7 @@ CREATE INDEX idx_token_type_status ON tokens(token_type, status);
 ### Enhanced User Table (Hybrid Soft Delete + ON DELETE CASCADE Strategy)
 
 ```sql
+-- Main users table with all user information including new fields
 CREATE TABLE users (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255), -- Optional: first name
@@ -81,18 +89,33 @@ CREATE TABLE users (
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
     password_hash TEXT,
-    phone VARCHAR(50) UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified BOOLEAN NOT NULL DEFAULT false,
+
+    -- Contact Information
+    phone VARCHAR(50) UNIQUE, -- Primary phone (unique)
+    mobile VARCHAR(50), -- Alternative mobile number
+    recovery_email VARCHAR(255), -- Recovery email address
+
+    -- Profile Information
+    display_name VARCHAR(255), -- Display name for UI
+    bio TEXT, -- User biography (max 500 chars)
+    gender VARCHAR(1), -- ISO 5218: 'm', 'f', 'x'
+    dob DATE, -- Date of birth
+    tmz VARCHAR(50), -- IANA timezone (e.g., America/New_York)
+
+    -- Security & Preferences
     is_locked BOOLEAN NOT NULL DEFAULT false,
     two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
     lang VARCHAR(10) NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
-    metadata JSON, -- JSON object for additional user information in English
     first_time BOOLEAN NOT NULL DEFAULT true,
 
-    -- Soft Delete Fields (Default Strategy)
+    -- Soft Delete Support
     deleted_at TIMESTAMP NULL, -- Timestamp when user was deleted (NULL = active)
     deletion_reason VARCHAR(100) NULL, -- Reason: 'user_request', 'admin_action', 'gdpr_compliance', 'inactivity', 'violation'
 
+    -- System Fields
+    reference_id VARCHAR(255), -- External reference ID
+    metadata JSON, -- JSON object for additional user information in English
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -127,6 +150,15 @@ CREATE INDEX idx_users_updated_at ON users(updated_at) WHERE deleted_at IS NULL;
 
 -- Language and metadata indexes
 CREATE INDEX idx_users_lang ON users(lang) WHERE deleted_at IS NULL AND lang IS NOT NULL;
+
+-- New profile and contact indexes
+CREATE INDEX idx_users_mobile ON users(mobile) WHERE deleted_at IS NULL AND mobile IS NOT NULL;
+CREATE INDEX idx_users_recovery_email ON users(recovery_email) WHERE deleted_at IS NULL AND recovery_email IS NOT NULL;
+CREATE INDEX idx_users_display_name ON users(display_name) WHERE deleted_at IS NULL AND display_name IS NOT NULL;
+CREATE INDEX idx_users_gender ON users(gender) WHERE deleted_at IS NULL AND gender IS NOT NULL;
+CREATE INDEX idx_users_dob ON users(dob) WHERE deleted_at IS NULL AND dob IS NOT NULL;
+CREATE INDEX idx_users_tmz ON users(tmz) WHERE deleted_at IS NULL AND tmz IS NOT NULL;
+CREATE INDEX idx_users_reference_id ON users(reference_id) WHERE deleted_at IS NULL AND reference_id IS NOT NULL;
 
 -- Composite indexes for common query patterns
 CREATE INDEX idx_users_type_verified ON users(user_type, is_verified) WHERE deleted_at IS NULL;
@@ -308,6 +340,13 @@ WHERE id = 'user_123';
 
 ### Organizations
 
+Enhanced organizations table with international support and branding capabilities.
+
+**New Features:**
+- **International Support**: Country field for global organization management
+- **Branding**: Picture/logo URL field for organization visual identity
+- **Comprehensive Indexing**: Optimized indexes for all organization fields
+
 ```sql
 CREATE TABLE organizations (
     id VARCHAR(255) PRIMARY KEY,
@@ -317,6 +356,8 @@ CREATE TABLE organizations (
     business_phone VARCHAR(50),
     tax_id VARCHAR(100),
     address TEXT,
+    country VARCHAR(2), -- ISO 2-letter country code
+    picture TEXT, -- Organization logo/picture URL
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -333,6 +374,16 @@ CREATE TABLE organization_users (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY (organization_id, user_id)
 );
+
+-- Organizations Indexes
+CREATE INDEX idx_organizations_owner_user_id ON organizations(owner_user_id);
+CREATE INDEX idx_organizations_name ON organizations(name);
+CREATE INDEX idx_organizations_business_email ON organizations(business_email);
+CREATE INDEX idx_organizations_business_phone ON organizations(business_phone);
+CREATE INDEX idx_organizations_tax_id ON organizations(tax_id);
+CREATE INDEX idx_organizations_country ON organizations(country);
+CREATE INDEX idx_organizations_created_at ON organizations(created_at);
+CREATE INDEX idx_organizations_updated_at ON organizations(updated_at);
 ```
 
 ### Addresses

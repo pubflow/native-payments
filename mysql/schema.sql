@@ -1,6 +1,6 @@
 -- MySQL Schema for Native Payments System
 
--- Users Table (Enhanced) - Hybrid Soft Delete + ON DELETE CASCADE Strategy
+-- Main users table with all user information including new fields
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255), -- Optional: first name
@@ -10,18 +10,33 @@ CREATE TABLE IF NOT EXISTS users (
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
     password_hash TEXT,
-    phone VARCHAR(50) UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified BOOLEAN NOT NULL DEFAULT false,
+
+    -- Contact Information
+    phone VARCHAR(50) UNIQUE, -- Primary phone (unique)
+    mobile VARCHAR(50), -- Alternative mobile number
+    recovery_email VARCHAR(255), -- Recovery email address
+
+    -- Profile Information
+    display_name VARCHAR(255), -- Display name for UI
+    bio TEXT, -- User biography (max 500 chars)
+    gender CHAR(1), -- ISO 5218: 'm', 'f', 'x'
+    dob DATE, -- Date of birth
+    tmz VARCHAR(50), -- IANA timezone (e.g., America/New_York)
+
+    -- Security & Preferences
     is_locked BOOLEAN NOT NULL DEFAULT false,
     two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
     lang VARCHAR(10) NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
-    metadata JSON, -- JSON object for additional user information in English
     first_time BOOLEAN NOT NULL DEFAULT true,
 
-    -- Soft Delete Fields (Default Strategy)
+    -- Soft Delete Support
     deleted_at TIMESTAMP NULL, -- Timestamp when user was deleted (NULL = active)
     deletion_reason VARCHAR(100) NULL, -- Reason: 'user_request', 'admin_action', 'gdpr_compliance', 'inactivity', 'violation'
 
+    -- System Fields
+    reference_id VARCHAR(255), -- External reference ID
+    metadata JSON, -- JSON object for additional user information in English
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -61,6 +76,8 @@ CREATE TABLE IF NOT EXISTS organizations (
     business_phone VARCHAR(50),
     tax_id VARCHAR(100),
     address TEXT,
+    country CHAR(2), -- ISO 2-letter country code
+    picture TEXT, -- Organization logo/picture URL
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -558,9 +575,34 @@ CREATE INDEX idx_users_updated_at ON users(updated_at, deleted_at);
 -- Language and metadata indexes
 CREATE INDEX idx_users_lang ON users(lang, deleted_at);
 
+-- New profile and contact indexes
+CREATE INDEX idx_users_mobile ON users(mobile, deleted_at);
+CREATE INDEX idx_users_recovery_email ON users(recovery_email, deleted_at);
+CREATE INDEX idx_users_display_name ON users(display_name, deleted_at);
+CREATE INDEX idx_users_gender ON users(gender, deleted_at);
+CREATE INDEX idx_users_dob ON users(dob, deleted_at);
+CREATE INDEX idx_users_tmz ON users(tmz, deleted_at);
+CREATE INDEX idx_users_reference_id ON users(reference_id, deleted_at);
+
 -- Composite indexes for common query patterns
 CREATE INDEX idx_users_type_verified ON users(user_type, is_verified, deleted_at);
 CREATE INDEX idx_users_email_type ON users(email, user_type, deleted_at);
+
+-- ========================================
+-- OPTIMIZED INDEXES FOR ORGANIZATIONS TABLE
+-- ========================================
+
+-- Primary functional indexes for organizations
+CREATE INDEX idx_organizations_owner_user_id ON organizations(owner_user_id);
+CREATE INDEX idx_organizations_name ON organizations(name);
+CREATE INDEX idx_organizations_business_email ON organizations(business_email);
+CREATE INDEX idx_organizations_business_phone ON organizations(business_phone);
+CREATE INDEX idx_organizations_tax_id ON organizations(tax_id);
+CREATE INDEX idx_organizations_country ON organizations(country);
+
+-- Temporal indexes for organizations
+CREATE INDEX idx_organizations_created_at ON organizations(created_at);
+CREATE INDEX idx_organizations_updated_at ON organizations(updated_at);
 
 -- ========================================
 -- OTHER TABLE INDEXES

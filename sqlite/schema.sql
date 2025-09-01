@@ -3,7 +3,7 @@
 -- Enable foreign keys
 PRAGMA foreign_keys = ON;
 
--- Users Table (Enhanced) - Uses Soft Delete Strategy
+-- Main users table with all user information including new fields
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT, -- Optional: first name
@@ -13,18 +13,33 @@ CREATE TABLE IF NOT EXISTS users (
     picture TEXT,
     user_name TEXT UNIQUE,
     password_hash TEXT,
-    phone TEXT UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true
+
+    -- Contact Information
+    phone TEXT UNIQUE, -- Primary phone (unique)
+    mobile TEXT, -- Alternative mobile number
+    recovery_email TEXT, -- Recovery email address
+
+    -- Profile Information
+    display_name TEXT, -- Display name for UI
+    bio TEXT, -- User biography (max 500 chars)
+    gender TEXT, -- ISO 5218: 'm', 'f', 'x'
+    dob TEXT, -- Date of birth (YYYY-MM-DD format)
+    tmz TEXT, -- IANA timezone (e.g., America/New_York)
+
+    -- Security & Preferences
     is_locked INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true
     two_factor INTEGER NOT NULL DEFAULT 0, -- Boolean: 0=false, 1=true (indicates if 2FA is enabled)
     lang TEXT NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
-    metadata TEXT, -- JSON string for additional user information in English
     first_time INTEGER NOT NULL DEFAULT 1, -- Boolean: 0=false, 1=true
 
-    -- Soft Delete Fields
+    -- Soft Delete Support
     deleted_at TEXT NULL, -- Timestamp when user was deleted (NULL = active)
     deletion_reason TEXT NULL, -- Reason for deletion ('user_request', 'admin_action', 'gdpr_compliance', etc.)
 
+    -- System Fields
+    reference_id TEXT, -- External reference ID
+    metadata TEXT, -- JSON string for additional user information in English
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -61,6 +76,15 @@ CREATE INDEX IF NOT EXISTS idx_users_updated_at ON users(updated_at) WHERE delet
 -- Language and metadata indexes
 CREATE INDEX IF NOT EXISTS idx_users_lang ON users(lang) WHERE deleted_at IS NULL AND lang IS NOT NULL;
 
+-- New profile and contact indexes
+CREATE INDEX IF NOT EXISTS idx_users_mobile ON users(mobile) WHERE deleted_at IS NULL AND mobile IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_recovery_email ON users(recovery_email) WHERE deleted_at IS NULL AND recovery_email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name) WHERE deleted_at IS NULL AND display_name IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_gender ON users(gender) WHERE deleted_at IS NULL AND gender IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_dob ON users(dob) WHERE deleted_at IS NULL AND dob IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_tmz ON users(tmz) WHERE deleted_at IS NULL AND tmz IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_reference_id ON users(reference_id) WHERE deleted_at IS NULL AND reference_id IS NOT NULL;
+
 -- Composite indexes for common query patterns
 CREATE INDEX IF NOT EXISTS idx_users_type_verified ON users(user_type, is_verified) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_email_type ON users(email, user_type) WHERE deleted_at IS NULL;
@@ -71,6 +95,22 @@ AFTER UPDATE ON users
 BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
+
+-- ========================================
+-- OPTIMIZED INDEXES FOR ORGANIZATIONS TABLE
+-- ========================================
+
+-- Primary functional indexes for organizations
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_user_id ON organizations(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_name ON organizations(name);
+CREATE INDEX IF NOT EXISTS idx_organizations_business_email ON organizations(business_email) WHERE business_email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_business_phone ON organizations(business_phone) WHERE business_phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_tax_id ON organizations(tax_id) WHERE tax_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_country ON organizations(country) WHERE country IS NOT NULL;
+
+-- Temporal indexes for organizations
+CREATE INDEX IF NOT EXISTS idx_organizations_created_at ON organizations(created_at);
+CREATE INDEX IF NOT EXISTS idx_organizations_updated_at ON organizations(updated_at);
 
 -- Tokens (Authentication & Security)
 CREATE TABLE IF NOT EXISTS tokens (
@@ -115,6 +155,8 @@ CREATE TABLE IF NOT EXISTS organizations (
     business_phone TEXT,
     tax_id TEXT,
     address TEXT,
+    country TEXT, -- ISO 2-letter country code
+    picture TEXT, -- Organization logo/picture URL
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE

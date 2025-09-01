@@ -1,6 +1,6 @@
 -- PostgreSQL Schema for Native Payments System
 
--- Users Table (Enhanced) - Hybrid Soft Delete + ON DELETE CASCADE Strategy
+-- Main users table with all user information including new fields
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(255) PRIMARY KEY,
     name VARCHAR(255), -- Optional: first name
@@ -10,18 +10,33 @@ CREATE TABLE IF NOT EXISTS users (
     picture TEXT,
     user_name VARCHAR(255) UNIQUE,
     password_hash TEXT,
-    phone VARCHAR(50) UNIQUE, -- Optional phone number for SMS authentication (unique)
     is_verified BOOLEAN NOT NULL DEFAULT false,
+
+    -- Contact Information
+    phone VARCHAR(50) UNIQUE, -- Primary phone (unique)
+    mobile VARCHAR(50), -- Alternative mobile number
+    recovery_email VARCHAR(255), -- Recovery email address
+
+    -- Profile Information
+    display_name VARCHAR(255), -- Display name for UI
+    bio TEXT, -- User biography (max 500 chars)
+    gender VARCHAR(1), -- ISO 5218: 'm', 'f', 'x'
+    dob DATE, -- Date of birth
+    tmz VARCHAR(50), -- IANA timezone (e.g., America/New_York)
+
+    -- Security & Preferences
     is_locked BOOLEAN NOT NULL DEFAULT false,
     two_factor BOOLEAN NOT NULL DEFAULT false, -- Indicates if 2FA is enabled
     lang VARCHAR(10) NULL, -- Optional language preference (e.g., 'en', 'es', 'ja')
-    metadata JSONB, -- JSON object for additional user information in English
     first_time BOOLEAN NOT NULL DEFAULT true,
 
-    -- Soft Delete Fields (Default Strategy)
+    -- Soft Delete Support
     deleted_at TIMESTAMP NULL, -- Timestamp when user was deleted (NULL = active)
     deletion_reason VARCHAR(100) NULL, -- Reason: 'user_request', 'admin_action', 'gdpr_compliance', 'inactivity', 'violation'
 
+    -- System Fields
+    reference_id VARCHAR(255), -- External reference ID
+    metadata JSONB, -- JSON object for additional user information in English
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -72,6 +87,15 @@ CREATE INDEX IF NOT EXISTS idx_users_updated_at ON users(updated_at) WHERE delet
 -- Language and metadata indexes
 CREATE INDEX IF NOT EXISTS idx_users_lang ON users(lang) WHERE deleted_at IS NULL AND lang IS NOT NULL;
 
+-- New profile and contact indexes
+CREATE INDEX IF NOT EXISTS idx_users_mobile ON users(mobile) WHERE deleted_at IS NULL AND mobile IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_recovery_email ON users(recovery_email) WHERE deleted_at IS NULL AND recovery_email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_display_name ON users(display_name) WHERE deleted_at IS NULL AND display_name IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_gender ON users(gender) WHERE deleted_at IS NULL AND gender IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_dob ON users(dob) WHERE deleted_at IS NULL AND dob IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_tmz ON users(tmz) WHERE deleted_at IS NULL AND tmz IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_reference_id ON users(reference_id) WHERE deleted_at IS NULL AND reference_id IS NOT NULL;
+
 -- Composite indexes for common query patterns
 CREATE INDEX IF NOT EXISTS idx_users_type_verified ON users(user_type, is_verified) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_email_type ON users(email, user_type) WHERE deleted_at IS NULL;
@@ -116,6 +140,8 @@ CREATE TABLE IF NOT EXISTS organizations (
     business_phone VARCHAR(50),
     tax_id VARCHAR(100),
     address TEXT,
+    country VARCHAR(2), -- ISO 2-letter country code
+    picture TEXT, -- Organization logo/picture URL
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -125,6 +151,22 @@ CREATE TRIGGER update_organizations_timestamp
 BEFORE UPDATE ON organizations
 FOR EACH ROW
 EXECUTE FUNCTION update_timestamp();
+
+-- ========================================
+-- OPTIMIZED INDEXES FOR ORGANIZATIONS TABLE
+-- ========================================
+
+-- Primary functional indexes for organizations
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_user_id ON organizations(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_name ON organizations(name);
+CREATE INDEX IF NOT EXISTS idx_organizations_business_email ON organizations(business_email) WHERE business_email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_business_phone ON organizations(business_phone) WHERE business_phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_tax_id ON organizations(tax_id) WHERE tax_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_organizations_country ON organizations(country) WHERE country IS NOT NULL;
+
+-- Temporal indexes for organizations
+CREATE INDEX IF NOT EXISTS idx_organizations_created_at ON organizations(created_at);
+CREATE INDEX IF NOT EXISTS idx_organizations_updated_at ON organizations(updated_at);
 
 CREATE TABLE IF NOT EXISTS organization_users (
     id VARCHAR(255) PRIMARY KEY,

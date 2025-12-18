@@ -1045,7 +1045,7 @@ INSERT INTO subscriptions (
 );
 ```
 
-### Invoices (Enhanced with Guest Support)
+### Invoices (Enhanced with Guest Support and Payment Links)
 
 ```sql
 CREATE TABLE invoices (
@@ -1053,42 +1053,88 @@ CREATE TABLE invoices (
     invoice_number VARCHAR(255) UNIQUE NOT NULL,
     order_id VARCHAR(255),
     subscription_id VARCHAR(255),
+    payment_id VARCHAR(255), -- Optional reference to payment (updated after payment completion)
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
     customer_id VARCHAR(255), -- References external_entities table (supports both users and guests)
-    status VARCHAR(50) NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
-    amount_cents BIGINT NOT NULL,
-    tax_cents BIGINT NOT NULL DEFAULT 0,
-    discount_cents BIGINT NOT NULL DEFAULT 0,
-    total_cents BIGINT NOT NULL,
+
+    status VARCHAR(50) NOT NULL, -- 'draft', 'sent', 'paid', 'overdue', 'cancelled', 'void'
+
+    -- Unified pricing system
+    subtotal_cents BIGINT NOT NULL, -- Base amount before taxes and discounts
+    tax_cents BIGINT NOT NULL DEFAULT 0, -- Applied taxes
+    discount_cents BIGINT NOT NULL DEFAULT 0, -- Applied discounts
+    total_cents BIGINT NOT NULL, -- Final amount (subtotal + tax - discount)
+
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     issue_date TIMESTAMP NOT NULL,
     due_date TIMESTAMP NOT NULL,
     paid_date TIMESTAMP,
+
+    -- Enhanced guest invoice support
+    is_guest_invoice BOOLEAN NOT NULL DEFAULT false,
+    guest_data JSON, -- Guest information for invoices
+    guest_email VARCHAR(255), -- Extracted guest email for indexing
+
+    -- Payment link support
+    reference_code VARCHAR(100), -- For referencing specific payments
+    payment_link_url VARCHAR(500), -- Unique URL to pay this invoice
+    payment_link_expires_at TIMESTAMP, -- Payment link expiration
+
+    -- Payment method tracking (saved when payment is completed)
+    payment_method_id VARCHAR(255), -- Payment method used for this invoice (updated after payment)
+
     billing_address_id VARCHAR(255),
     provider_id VARCHAR(50),
     provider_invoice_id VARCHAR(255),
     invoice_url VARCHAR(500), -- Optional friendly URL to access the invoice
+
+    -- Coupon tracking
+    applied_coupons JSON, -- Applied coupons to this invoice
+
+    -- Line items and notes
+    line_items JSON, -- JSON array with detailed line item breakdown
+    notes TEXT, -- Additional notes for the invoice
+
+    -- Optional Features Integration (added for optional features support)
+    -- These columns enable integration with optional features when implemented
+    billing_schedule_id VARCHAR(255), -- Link to billing schedule if invoice was auto-generated (Billing Schedules feature)
+    account_balance_id VARCHAR(255), -- Link to account balance if payment uses balance (Account Balance feature)
+
+    metadata JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL) -- Must belong to a user, organization, or have a customer
+
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents),
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_invoice = true)
 );
 ```
 
 **Key Features:**
-- **Guest Support**: `customer_id` field enables invoices for guests without user accounts
+- **Guest Support**: `customer_id` and `is_guest_invoice` fields enable invoices for guests without user accounts
+- **Payment Links**: Generate unique payment URLs with expiration support
+- **Line Items**: Detailed breakdown of invoice items in JSON format
+- **Coupon Support**: Track applied coupons and discounts
+- **Status Tracking**: Complete invoice lifecycle (draft → sent → paid/overdue/cancelled/void)
 - **Unified Customer Management**: Links to `external_entities` table for both users and guests
 - **Flexible Ownership**: Can belong to users, organizations, or guests
 - **Provider Integration**: Supports provider-generated invoices with external URLs
 - **Complete Audit Trail**: Tracks all invoice states and payment dates
 - **Multi-Currency Support**: Handles invoices in different currencies
+- **Notes Support**: Add custom notes to invoices
+- **Optional Features Integration**:
+  - `billing_schedule_id` - Links to billing schedule for auto-generated invoices
+  - `account_balance_id` - Tracks which account balance was used for payment
 
 ### Webhooks and Events
 
@@ -1113,6 +1159,406 @@ CREATE TABLE payment_events (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+---
+
+## Optional Features
+
+The following features are optional and can be added independently based on your business needs. Each feature is self-contained and can be implemented without the others.
+
+### Cost Tracking (Optional Feature)
+
+Track product costs and calculate profit margins for orders and subscriptions.
+
+**Tables:**
+- `product_costs` - Define base costs for products
+- `order_costs` - Track actual costs per transaction
+- `order_profitability` (view) - Order profitability analysis
+- `subscription_profitability` (view) - Subscription profitability analysis
+
+**Documentation:** See [Cost Tracking Guide](./cost-tracking.md) for complete API documentation and usage examples.
+
+```sql
+-- Product costs table
+CREATE TABLE IF NOT EXISTS product_costs (
+    id VARCHAR(255) PRIMARY KEY,
+    product_id VARCHAR(255) NOT NULL,
+
+    -- Cost type
+    cost_type VARCHAR(50) NOT NULL, -- 'fixed', 'per_unit', 'per_hour', 'percentage'
+
+    -- Cost values (use appropriate one based on cost_type)
+    cost_per_unit_cents BIGINT,
+    cost_per_hour_cents BIGINT,
+    cost_percentage DECIMAL(5,2),
+    fixed_cost_cents BIGINT,
+
+    -- Overhead
+    overhead_percentage DECIMAL(5,2) DEFAULT 0,
+
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- Effective dates (for historical tracking)
+    effective_from TIMESTAMP NOT NULL,
+    effective_until TIMESTAMP,
+
+    -- Categorization
+    cost_category VARCHAR(50), -- 'production', 'shipping', 'labor', 'materials', 'overhead'
+    description TEXT,
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    CHECK (cost_type IN ('fixed', 'per_unit', 'per_hour', 'percentage'))
+);
+
+-- Order costs table
+CREATE TABLE IF NOT EXISTS order_costs (
+    id VARCHAR(255) PRIMARY KEY,
+    order_id VARCHAR(255),
+    order_item_id VARCHAR(255),
+    subscription_id VARCHAR(255),
+
+    -- Calculated costs
+    base_cost_cents BIGINT NOT NULL,
+    overhead_cost_cents BIGINT DEFAULT 0,
+    total_cost_cents BIGINT NOT NULL,
+
+    -- Calculation details
+    quantity DECIMAL(10,2),
+    unit_type VARCHAR(50), -- 'units', 'hours', 'percentage'
+
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- Reference to cost used
+    product_cost_id VARCHAR(255),
+    cost_breakdown JSON, -- Detailed breakdown
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_cost_id) REFERENCES product_costs(id) ON DELETE SET NULL,
+
+    CHECK (total_cost_cents = base_cost_cents + overhead_cost_cents)
+);
+
+-- Profitability views
+CREATE VIEW order_profitability AS
+SELECT
+    o.id AS order_id,
+    o.total_cents AS revenue_cents,
+    COALESCE(SUM(oc.total_cost_cents), 0) AS cost_cents,
+    o.total_cents - COALESCE(SUM(oc.total_cost_cents), 0) AS profit_cents,
+    CASE
+        WHEN o.total_cents > 0 THEN
+            ((o.total_cents - COALESCE(SUM(oc.total_cost_cents), 0)) * 100.0 / o.total_cents)
+        ELSE 0
+    END AS profit_margin_percentage
+FROM orders o
+LEFT JOIN order_costs oc ON o.id = oc.order_id
+GROUP BY o.id, o.total_cents;
+
+CREATE VIEW subscription_profitability AS
+SELECT
+    s.id AS subscription_id,
+    s.total_cents AS revenue_cents,
+    COALESCE(SUM(oc.total_cost_cents), 0) AS cost_cents,
+    s.total_cents - COALESCE(SUM(oc.total_cost_cents), 0) AS profit_cents,
+    CASE
+        WHEN s.total_cents > 0 THEN
+            ((s.total_cents - COALESCE(SUM(oc.total_cost_cents), 0)) * 100.0 / s.total_cents)
+        ELSE 0
+    END AS profit_margin_percentage
+FROM subscriptions s
+LEFT JOIN order_costs oc ON s.id = oc.subscription_id
+GROUP BY s.id, s.total_cents;
+```
+
+### Account Balance (Optional Feature)
+
+Customer wallets, credits, and prepayment systems with support for multiple balance types per customer.
+
+**Tables:**
+- `account_balances` - Track customer balances
+- `account_transactions` - Record all balance movements
+
+**Documentation:** See [Account Balance Guide](./account-balance.md) for complete API documentation and usage examples.
+
+```sql
+-- Account balances table
+CREATE TABLE IF NOT EXISTS account_balances (
+    id VARCHAR(255) PRIMARY KEY,
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
+    customer_id VARCHAR(255),
+
+    -- NEW: Segment balances by context/purpose
+    reference_code VARCHAR(100), -- 'main_wallet', 'promo_credits', 'refund_balance', 'subscription_prepaid'
+    balance_type VARCHAR(50) NOT NULL DEFAULT 'general', -- 'general', 'promotional', 'refund', 'prepaid'
+
+    -- Current balance
+    current_balance_cents BIGINT NOT NULL DEFAULT 0,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- Limits
+    credit_limit_cents BIGINT DEFAULT 0,
+    minimum_balance_cents BIGINT DEFAULT 0,
+
+    -- Expiration (for promotional credits)
+    expires_at TIMESTAMP,
+
+    -- Status
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    last_transaction_at TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL),
+    UNIQUE (user_id, organization_id, customer_id, currency, reference_code)
+);
+
+-- Account transactions table
+CREATE TABLE IF NOT EXISTS account_transactions (
+    id VARCHAR(255) PRIMARY KEY,
+    account_balance_id VARCHAR(255) NOT NULL,
+
+    -- Transaction details
+    transaction_type VARCHAR(50) NOT NULL, -- 'credit', 'debit', 'refund', 'adjustment', 'fee'
+    amount_cents BIGINT NOT NULL,
+
+    -- Balance tracking
+    balance_before_cents BIGINT NOT NULL,
+    balance_after_cents BIGINT NOT NULL,
+
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- References
+    invoice_id VARCHAR(255),
+    payment_id VARCHAR(255),
+    subscription_id VARCHAR(255),
+    order_id VARCHAR(255),
+
+    -- Description
+    description TEXT NOT NULL,
+    reference_code VARCHAR(100),
+
+    -- Status
+    status VARCHAR(50) NOT NULL DEFAULT 'completed', -- 'pending', 'completed', 'failed', 'reversed'
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+
+    FOREIGN KEY (account_balance_id) REFERENCES account_balances(id) ON DELETE CASCADE,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+
+    CHECK (transaction_type IN ('credit', 'debit', 'refund', 'adjustment', 'fee'))
+);
+```
+
+### Billing Schedules (Optional Feature)
+
+Automated recurring billing with flexible payment sources and retry logic.
+
+**Tables:**
+- `billing_schedules` - Configure recurring charges
+- `billing_schedule_executions` - Track execution history
+
+**Documentation:** See [Billing Schedules Guide](./billing-schedules.md) for complete API documentation and usage examples.
+
+```sql
+-- Billing schedules table
+CREATE TABLE IF NOT EXISTS billing_schedules (
+    id VARCHAR(255) PRIMARY KEY,
+
+    -- Who to charge
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
+    customer_id VARCHAR(255),
+
+    -- Schedule configuration
+    schedule_type VARCHAR(50) NOT NULL, -- 'recurring', 'one_time', 'metered'
+
+    -- Amounts
+    amount_cents BIGINT NOT NULL,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- Recurrence
+    billing_interval VARCHAR(50) NOT NULL, -- 'daily', 'weekly', 'monthly', 'yearly'
+    interval_multiplier INTEGER DEFAULT 1, -- Every X intervals
+
+    -- Dates
+    start_date TIMESTAMP NOT NULL,
+    end_date TIMESTAMP, -- NULL = indefinite
+    next_billing_date TIMESTAMP NOT NULL,
+    last_billed_at TIMESTAMP,
+
+    -- Payment method
+    payment_method_id VARCHAR(255),
+    account_balance_id VARCHAR(255), -- Can charge from specific balance
+    payment_priority VARCHAR(50) DEFAULT 'balance_first', -- 'balance_first', 'payment_method_first', 'balance_only', 'payment_method_only'
+
+    -- Status
+    status VARCHAR(50) NOT NULL DEFAULT 'active', -- 'active', 'paused', 'cancelled', 'completed', 'failed'
+
+    -- Retry logic
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    last_failure_reason TEXT,
+
+    -- Description
+    description TEXT NOT NULL,
+    reference_code VARCHAR(100),
+    category VARCHAR(50), -- 'subscription', 'installment', 'fee', 'custom'
+
+    -- Notifications
+    notify_before_days INTEGER DEFAULT 3,
+    last_notification_sent TIMESTAMP,
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
+    FOREIGN KEY (account_balance_id) REFERENCES account_balances(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL)
+);
+
+-- Billing schedule executions table
+CREATE TABLE IF NOT EXISTS billing_schedule_executions (
+    id VARCHAR(255) PRIMARY KEY,
+    billing_schedule_id VARCHAR(255) NOT NULL,
+
+    -- Execution details
+    scheduled_date TIMESTAMP NOT NULL,
+    executed_at TIMESTAMP,
+
+    -- Result
+    status VARCHAR(50) NOT NULL, -- 'pending', 'success', 'failed', 'skipped'
+    amount_charged_cents BIGINT,
+
+    -- Payment tracking
+    payment_id VARCHAR(255),
+    invoice_id VARCHAR(255),
+    payment_source VARCHAR(50), -- 'account_balance', 'payment_method', 'mixed'
+
+    -- Error handling
+    error_message TEXT,
+    retry_attempt INTEGER DEFAULT 0,
+
+    metadata JSON,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (billing_schedule_id) REFERENCES billing_schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL
+);
+```
+
+### Receipts (Optional Feature)
+
+Post-payment receipts for complete billing documentation.
+
+**Tables:**
+- `receipts` - Post-payment proof documents
+
+**Documentation:** See [Invoices & Receipts Guide](./invoices-receipts.md) for complete API documentation and usage examples.
+
+**Note:** Invoices table already exists in core schema. This feature adds receipts for post-payment documentation.
+
+```sql
+-- Receipts table
+CREATE TABLE IF NOT EXISTS receipts (
+    id VARCHAR(255) PRIMARY KEY,
+    receipt_number VARCHAR(255) UNIQUE NOT NULL,
+
+    -- References
+    invoice_id VARCHAR(255), -- Can be related to invoice
+    payment_id VARCHAR(255) NOT NULL, -- Always related to a payment
+    order_id VARCHAR(255),
+    subscription_id VARCHAR(255),
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
+    customer_id VARCHAR(255),
+
+    -- Amounts (reflect what was PAID)
+    subtotal_cents BIGINT NOT NULL,
+    tax_cents BIGINT NOT NULL DEFAULT 0,
+    discount_cents BIGINT NOT NULL DEFAULT 0,
+    total_cents BIGINT NOT NULL,
+
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+
+    -- Payment method used
+    payment_method_id VARCHAR(255),
+    payment_method_type VARCHAR(50), -- 'credit_card', 'bank_transfer', 'account_balance', etc.
+
+    -- Customer data (snapshot)
+    customer_name VARCHAR(255),
+    customer_email VARCHAR(255),
+    customer_address JSON,
+
+    -- Status
+    status VARCHAR(50) NOT NULL DEFAULT 'issued', -- 'issued', 'void'
+
+    -- Guest support
+    is_guest_receipt BOOLEAN NOT NULL DEFAULT false,
+    guest_data JSON,
+    guest_email VARCHAR(255),
+
+    -- URLs and documents
+    receipt_url VARCHAR(500),
+    receipt_pdf_url VARCHAR(500),
+
+    -- Metadata
+    line_items JSON, -- JSON with item breakdown
+    applied_coupons JSON,
+    notes TEXT,
+    metadata JSON,
+
+    issue_date TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_receipt = true),
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents)
+);
+```
+
+**Key Features of Optional Features:**
+- **Modular Design**: Each feature can be implemented independently
+- **No Dependencies**: Features work standalone or together
+- **Complete Documentation**: Each feature has dedicated guide with API docs and examples
+- **Production Ready**: Fully tested schemas with proper constraints and indexes
+
+---
 
 ## Membership System
 

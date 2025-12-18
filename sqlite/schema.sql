@@ -622,6 +622,14 @@ CREATE TABLE IF NOT EXISTS invoices (
     -- Coupon tracking
     applied_coupons TEXT, -- JSON string of applied coupons to this invoice
 
+    -- Line items and notes
+    line_items TEXT, -- JSON string with detailed line item breakdown
+    notes TEXT, -- Additional notes for the invoice
+
+    -- Optional Features Integration (added for optional features support)
+    billing_schedule_id TEXT, -- Link to billing schedule if invoice was auto-generated
+    account_balance_id TEXT, -- Link to account balance if payment uses balance
+
     metadata TEXT, -- JSON string
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1094,3 +1102,466 @@ CREATE INDEX idx_tax_rates_location ON tax_rates(country, state_province, city);
 CREATE INDEX idx_tax_rates_priority ON tax_rates(priority DESC);
 CREATE INDEX idx_tax_rates_effective ON tax_rates(effective_from, effective_until);
 CREATE INDEX idx_tax_rates_type ON tax_rates(type);
+
+-- ============================================
+-- COST TRACKING FEATURE (Optional)
+-- ============================================
+-- Add these tables to enable profit analysis and cost tracking
+-- This feature allows you to track product costs and calculate profit margins
+
+-- Product Costs - Define base costs for products/services
+CREATE TABLE IF NOT EXISTS product_costs (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL,
+
+    -- Cost type
+    cost_type TEXT NOT NULL, -- 'fixed', 'per_unit', 'per_hour', 'percentage'
+
+    -- Cost values (use appropriate field based on cost_type)
+    cost_per_unit_cents INTEGER, -- For physical products
+    cost_per_hour_cents INTEGER, -- For hourly services
+    cost_percentage REAL, -- For variable costs (e.g., commissions)
+    fixed_cost_cents INTEGER, -- Fixed costs (e.g., setup fees)
+
+    -- Indirect costs
+    overhead_percentage REAL DEFAULT 0, -- General overhead expenses
+
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Cost validity period (for historical tracking)
+    effective_from TEXT NOT NULL,
+    effective_until TEXT,
+
+    -- Categorization
+    cost_category TEXT, -- 'production', 'shipping', 'labor', 'materials', 'overhead'
+    description TEXT,
+
+    metadata TEXT, -- JSON string
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    CHECK (cost_type IN ('fixed', 'per_unit', 'per_hour', 'percentage'))
+);
+
+-- Trigger for updated_at on product_costs
+CREATE TRIGGER IF NOT EXISTS update_product_costs_timestamp
+AFTER UPDATE ON product_costs
+BEGIN
+    UPDATE product_costs SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Order Costs - Track actual costs per order/transaction
+CREATE TABLE IF NOT EXISTS order_costs (
+    id TEXT PRIMARY KEY,
+    order_id TEXT,
+    order_item_id TEXT,
+    subscription_id TEXT,
+
+    -- Calculated costs
+    base_cost_cents INTEGER NOT NULL,
+    overhead_cost_cents INTEGER DEFAULT 0,
+    total_cost_cents INTEGER NOT NULL,
+
+    -- Calculation details
+    quantity REAL, -- Can be hours, units, etc.
+    unit_type TEXT, -- 'units', 'hours', 'percentage'
+
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Reference to cost used
+    product_cost_id TEXT,
+    cost_breakdown TEXT, -- JSON string with detailed breakdown
+
+    metadata TEXT, -- JSON string
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_cost_id) REFERENCES product_costs(id) ON DELETE SET NULL,
+
+    CHECK (total_cost_cents = base_cost_cents + overhead_cost_cents)
+);
+
+-- View for order profitability analysis
+CREATE VIEW IF NOT EXISTS order_profitability AS
+SELECT
+    o.id as order_id,
+    o.order_number,
+    o.user_id,
+    o.total_cents as revenue_cents,
+    COALESCE(SUM(oc.total_cost_cents), 0) as cost_cents,
+    o.total_cents - COALESCE(SUM(oc.total_cost_cents), 0) as profit_cents,
+    CASE
+        WHEN o.total_cents > 0
+        THEN ROUND(((o.total_cents - COALESCE(SUM(oc.total_cost_cents), 0)) * 100.0 / o.total_cents), 2)
+        ELSE 0
+    END as profit_margin_percentage,
+    o.created_at
+FROM orders o
+LEFT JOIN order_costs oc ON o.id = oc.order_id
+GROUP BY o.id;
+
+-- View for subscription profitability analysis
+CREATE VIEW IF NOT EXISTS subscription_profitability AS
+SELECT
+    s.id as subscription_id,
+    s.user_id,
+    s.product_id,
+    s.total_cents as revenue_cents,
+    COALESCE(SUM(oc.total_cost_cents), 0) as cost_cents,
+    s.total_cents - COALESCE(SUM(oc.total_cost_cents), 0) as profit_cents,
+    CASE
+        WHEN s.total_cents > 0
+        THEN ROUND(((s.total_cents - COALESCE(SUM(oc.total_cost_cents), 0)) * 100.0 / s.total_cents), 2)
+        ELSE 0
+    END as profit_margin_percentage,
+    s.billing_interval,
+    s.created_at
+FROM subscriptions s
+LEFT JOIN order_costs oc ON s.id = oc.subscription_id
+GROUP BY s.id;
+
+-- Cost Tracking Indexes
+CREATE INDEX idx_product_costs_product ON product_costs(product_id);
+CREATE INDEX idx_product_costs_effective ON product_costs(effective_from, effective_until);
+CREATE INDEX idx_product_costs_category ON product_costs(cost_category);
+CREATE INDEX idx_product_costs_type ON product_costs(cost_type);
+
+CREATE INDEX idx_order_costs_order ON order_costs(order_id);
+CREATE INDEX idx_order_costs_subscription ON order_costs(subscription_id);
+CREATE INDEX idx_order_costs_created ON order_costs(created_at);
+CREATE INDEX idx_order_costs_product_cost ON order_costs(product_cost_id);
+
+-- ============================================
+-- ACCOUNT BALANCE FEATURE (Optional)
+-- ============================================
+-- Add these tables to enable customer account balances, credits, and wallet system
+-- This feature allows prepayments, promotional credits, and account-based transactions
+
+-- Account Balances - Track customer balances (wallets, credits, prepayments)
+CREATE TABLE IF NOT EXISTS account_balances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    organization_id TEXT,
+    customer_id TEXT, -- For registered guests
+
+    -- NEW: Segment balances by context/purpose
+    reference_code TEXT, -- 'main_wallet', 'promo_credits', 'refund_balance', 'subscription_prepaid'
+    balance_type TEXT NOT NULL DEFAULT 'general', -- 'general', 'promotional', 'refund', 'prepaid'
+
+    -- Current balance
+    current_balance_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Limits
+    credit_limit_cents INTEGER DEFAULT 0, -- Allowed credit limit
+    minimum_balance_cents INTEGER DEFAULT 0, -- Required minimum balance
+
+    -- Expiration (for promotional credits)
+    expires_at TEXT, -- For balances that expire
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'frozen', 'suspended'
+
+    metadata TEXT, -- JSON string
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_transaction_at TEXT,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL),
+    UNIQUE (user_id, organization_id, customer_id, currency, reference_code)
+);
+
+-- Trigger for updated_at on account_balances
+CREATE TRIGGER IF NOT EXISTS update_account_balances_timestamp
+AFTER UPDATE ON account_balances
+BEGIN
+    UPDATE account_balances SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Account Transactions - Record all balance movements
+CREATE TABLE IF NOT EXISTS account_transactions (
+    id TEXT PRIMARY KEY,
+    account_balance_id TEXT NOT NULL,
+
+    -- Transaction type
+    transaction_type TEXT NOT NULL, -- 'credit', 'debit', 'refund', 'adjustment', 'fee'
+
+    -- Amounts
+    amount_cents INTEGER NOT NULL,
+    balance_before_cents INTEGER NOT NULL,
+    balance_after_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- References
+    invoice_id TEXT, -- If related to an invoice
+    payment_id TEXT, -- If related to a payment
+    subscription_id TEXT, -- If related to subscription
+    order_id TEXT, -- If related to order
+
+    -- Description
+    description TEXT NOT NULL,
+    reference_code TEXT, -- Unique reference code
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'completed', -- 'pending', 'completed', 'failed', 'reversed'
+
+    metadata TEXT, -- JSON string
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT,
+
+    FOREIGN KEY (account_balance_id) REFERENCES account_balances(id) ON DELETE CASCADE,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+
+    CHECK (transaction_type IN ('credit', 'debit', 'refund', 'adjustment', 'fee'))
+);
+
+-- Account Balance Indexes
+CREATE INDEX idx_account_balances_user ON account_balances(user_id);
+CREATE INDEX idx_account_balances_org ON account_balances(organization_id);
+CREATE INDEX idx_account_balances_customer ON account_balances(customer_id);
+CREATE INDEX idx_account_balances_reference ON account_balances(reference_code);
+CREATE INDEX idx_account_balances_type ON account_balances(balance_type);
+CREATE INDEX idx_account_balances_expires ON account_balances(expires_at);
+CREATE INDEX idx_account_balances_status ON account_balances(status);
+
+CREATE INDEX idx_account_transactions_balance ON account_transactions(account_balance_id);
+CREATE INDEX idx_account_transactions_created ON account_transactions(created_at);
+CREATE INDEX idx_account_transactions_type ON account_transactions(transaction_type);
+CREATE INDEX idx_account_transactions_invoice ON account_transactions(invoice_id);
+CREATE INDEX idx_account_transactions_payment ON account_transactions(payment_id);
+CREATE INDEX idx_account_transactions_status ON account_transactions(status);
+CREATE INDEX idx_account_transactions_reference ON account_transactions(reference_code);
+
+-- Account Balance Integration with Core Tables
+-- Note: The invoices table (core schema) includes account_balance_id column for tracking
+-- which balance was used for payment. This enables mixed payment scenarios.
+
+-- ============================================
+-- BILLING SCHEDULES FEATURE (Optional)
+-- ============================================
+-- Add these tables to enable automated recurring billing
+-- This feature allows flexible recurring charges with multiple payment sources
+
+-- Billing Schedules - Configure recurring charges
+CREATE TABLE IF NOT EXISTS billing_schedules (
+    id TEXT PRIMARY KEY,
+
+    -- Who gets charged
+    user_id TEXT,
+    organization_id TEXT,
+    customer_id TEXT,
+
+    -- Charge configuration
+    schedule_type TEXT NOT NULL, -- 'recurring', 'one_time', 'metered'
+
+    -- Amounts
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Recurrence
+    billing_interval TEXT NOT NULL, -- 'daily', 'weekly', 'monthly', 'yearly'
+    interval_multiplier INTEGER DEFAULT 1, -- Every X intervals
+
+    -- Dates
+    start_date TEXT NOT NULL,
+    end_date TEXT, -- NULL = indefinite
+    next_billing_date TEXT NOT NULL,
+    last_billed_at TEXT,
+
+    -- Payment method
+    payment_method_id TEXT,
+    account_balance_id TEXT, -- Can charge from specific balance
+    payment_priority TEXT DEFAULT 'balance_first', -- 'balance_first', 'payment_method_first', 'balance_only', 'payment_method_only'
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'active', -- 'active', 'paused', 'cancelled', 'completed', 'failed'
+
+    -- Retry logic
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    last_failure_reason TEXT,
+
+    -- Description
+    description TEXT NOT NULL,
+    reference_code TEXT, -- To identify charge type
+    category TEXT, -- 'subscription', 'installment', 'fee', 'custom'
+
+    -- Notifications
+    notify_before_days INTEGER DEFAULT 3, -- Notify X days before
+    last_notification_sent TEXT,
+
+    metadata TEXT, -- JSON string
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
+    FOREIGN KEY (account_balance_id) REFERENCES account_balances(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL),
+    CHECK (schedule_type IN ('recurring', 'one_time', 'metered')),
+    CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly'))
+);
+
+-- Trigger for updated_at on billing_schedules
+CREATE TRIGGER IF NOT EXISTS update_billing_schedules_timestamp
+AFTER UPDATE ON billing_schedules
+BEGIN
+    UPDATE billing_schedules SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Billing Schedule Executions - Track execution history
+CREATE TABLE IF NOT EXISTS billing_schedule_executions (
+    id TEXT PRIMARY KEY,
+    billing_schedule_id TEXT NOT NULL,
+
+    -- Result
+    execution_status TEXT NOT NULL, -- 'success', 'failed', 'partial'
+
+    -- Amounts
+    attempted_amount_cents INTEGER NOT NULL,
+    charged_amount_cents INTEGER,
+
+    -- Created references
+    payment_id TEXT,
+    invoice_id TEXT,
+    account_transaction_id TEXT,
+
+    -- Details
+    payment_source TEXT, -- 'account_balance', 'payment_method', 'mixed'
+    error_message TEXT,
+
+    executed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    metadata TEXT, -- JSON string
+
+    FOREIGN KEY (billing_schedule_id) REFERENCES billing_schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (account_transaction_id) REFERENCES account_transactions(id) ON DELETE SET NULL
+);
+
+-- Billing Schedules Indexes
+CREATE INDEX idx_billing_schedules_user ON billing_schedules(user_id);
+CREATE INDEX idx_billing_schedules_org ON billing_schedules(organization_id);
+CREATE INDEX idx_billing_schedules_next_billing ON billing_schedules(next_billing_date, status);
+CREATE INDEX idx_billing_schedules_status ON billing_schedules(status);
+CREATE INDEX idx_billing_schedules_reference ON billing_schedules(reference_code);
+CREATE INDEX idx_billing_schedules_category ON billing_schedules(category);
+
+CREATE INDEX idx_billing_executions_schedule ON billing_schedule_executions(billing_schedule_id);
+CREATE INDEX idx_billing_executions_status ON billing_schedule_executions(execution_status);
+CREATE INDEX idx_billing_executions_executed ON billing_schedule_executions(executed_at);
+
+-- Billing Schedules Integration with Core Tables
+-- Note: The invoices table (core schema) includes billing_schedule_id column for tracking
+-- which billing schedule generated the invoice. This enables automatic invoice generation.
+
+-- ============================================
+-- INVOICES & RECEIPTS FEATURE (Optional)
+-- ============================================
+-- Add these tables to enable universal billing system
+-- Invoices = pre-payment documents, Receipts = post-payment proof
+-- Note: invoices table already exists in core schema, we only add receipts here
+
+-- Receipts - Post-payment proof (generated after successful payment)
+CREATE TABLE IF NOT EXISTS receipts (
+    id TEXT PRIMARY KEY,
+    receipt_number TEXT UNIQUE NOT NULL,
+
+    -- References
+    invoice_id TEXT, -- Can be related to invoice
+    payment_id TEXT NOT NULL, -- Always related to a payment
+    order_id TEXT,
+    subscription_id TEXT,
+    user_id TEXT,
+    organization_id TEXT,
+    customer_id TEXT,
+
+    -- Amounts (reflect what was PAID)
+    subtotal_cents INTEGER NOT NULL,
+    tax_cents INTEGER NOT NULL DEFAULT 0,
+    discount_cents INTEGER NOT NULL DEFAULT 0,
+    total_cents INTEGER NOT NULL,
+
+    currency TEXT NOT NULL DEFAULT 'USD',
+
+    -- Payment method used
+    payment_method_id TEXT,
+    payment_method_type TEXT, -- 'credit_card', 'bank_transfer', 'account_balance', etc.
+
+    -- Customer data (snapshot)
+    customer_name TEXT,
+    customer_email TEXT,
+    customer_address TEXT, -- JSON string with address details
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'issued', -- 'issued', 'void'
+
+    -- Guest support
+    is_guest_receipt INTEGER NOT NULL DEFAULT 0,
+    guest_data TEXT, -- JSON string
+    guest_email TEXT,
+
+    -- URLs and documents
+    receipt_url TEXT,
+    receipt_pdf_url TEXT,
+
+    -- Metadata
+    line_items TEXT, -- JSON string with item breakdown
+    applied_coupons TEXT, -- JSON string with applied coupons
+    notes TEXT,
+    metadata TEXT, -- JSON string
+
+    issue_date TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
+    FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
+
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_receipt = 1),
+    CHECK (total_cents = subtotal_cents + tax_cents - discount_cents)
+);
+
+-- Trigger for updated_at on receipts
+CREATE TRIGGER IF NOT EXISTS update_receipts_timestamp
+AFTER UPDATE ON receipts
+BEGIN
+    UPDATE receipts SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Receipts Indexes
+CREATE INDEX idx_receipts_payment ON receipts(payment_id);
+CREATE INDEX idx_receipts_invoice ON receipts(invoice_id);
+CREATE INDEX idx_receipts_user ON receipts(user_id);
+CREATE INDEX idx_receipts_customer ON receipts(customer_id);
+CREATE INDEX idx_receipts_created ON receipts(created_at);
+CREATE INDEX idx_receipts_guest_email ON receipts(guest_email);
+CREATE INDEX idx_receipts_receipt_number ON receipts(receipt_number);
+CREATE INDEX idx_receipts_status ON receipts(status);
+
+-- ============================================
+-- OPTIONAL FEATURES INTEGRATION INDEXES
+-- ============================================
+-- These indexes support the optional features integration with core tables
+
+-- Invoices integration with optional features
+CREATE INDEX idx_invoices_billing_schedule ON invoices(billing_schedule_id);
+CREATE INDEX idx_invoices_account_balance ON invoices(account_balance_id);

@@ -351,15 +351,362 @@ mysql < analytics_events.sql    # optional
 mysql < user_cohorts.sql       # optional
 ```
 
+---
+
+## 🎯 **Optional Features Use Cases**
+
+The following features are optional and can be added independently based on your business needs.
+
+### 📊 **Cost Tracking**
+
+**Perfect for:** E-commerce, manufacturing, service businesses that need profit analysis
+
+**When to use:**
+- ✅ You need to track product costs and profit margins
+- ✅ You want profitability analytics
+- ✅ You have costs that change over time
+- ✅ You need to understand business profitability
+
+**Tables you need:**
+```sql
+✅ product_costs
+✅ order_costs
+✅ order_profitability (view)
+✅ subscription_profitability (view)
+```
+
+**Example use cases:**
+
+**1. E-commerce Store with Cost Tracking:**
+```javascript
+// Track manufacturing cost
+await createProductCost({
+  product_id: 'prod_tshirt',
+  cost_per_unit_cents: 800,  // $8 per shirt
+  overhead_percentage: 20,    // 20% overhead
+  cost_category: 'production'
+});
+
+// Calculate profit for order
+const profit = await getOrderProfitability('order_123');
+// Returns: { revenue: $25, cost: $16, profit: $9, margin: 36% }
+```
+
+**2. Service Business with Hourly Costs:**
+```javascript
+// Track consultant hourly cost
+await createProductCost({
+  product_id: 'service_consulting',
+  cost_per_hour_cents: 5000,  // $50/hour cost
+  cost_category: 'labor'
+});
+```
+
+**3. Profitability Reports:**
+```javascript
+// Get monthly profitability
+const report = await getProfitabilityReport({
+  start_date: '2024-01-01',
+  end_date: '2024-01-31'
+});
+// Returns: total revenue, costs, profit, and margin
+```
+
+**Full Documentation:** [Cost Tracking Guide](./cost-tracking.md)
+
+---
+
+### 💰 **Account Balance**
+
+**Perfect for:** Platforms with wallets, promotional credits, prepaid services
+
+**When to use:**
+- ✅ You need customer wallet functionality
+- ✅ You want to offer promotional credits
+- ✅ You handle refunds as account credits
+- ✅ You offer prepaid services
+- ✅ You need multiple balance types per customer
+
+**Tables you need:**
+```sql
+✅ account_balances
+✅ account_transactions
+```
+
+**Example use cases:**
+
+**1. Customer Wallet System:**
+```javascript
+// Create main wallet
+await createBalance({
+  user_id: 'user_123',
+  reference_code: 'main_wallet',
+  balance_type: 'general'
+});
+
+// Customer adds $50 to wallet
+await creditBalance('bal_123', {
+  amount_cents: 5000,
+  description: 'Wallet top-up'
+});
+
+// Pay with wallet
+await payWithBalance({
+  user_id: 'user_123',
+  balance_reference_code: 'main_wallet',
+  amount_cents: 2000
+});
+```
+
+**2. Promotional Credits:**
+```javascript
+// Give $10 promo credit (expires in 30 days)
+await createBalance({
+  user_id: 'user_123',
+  reference_code: 'promo_credits',
+  balance_type: 'promotional',
+  initial_balance_cents: 1000,
+  expires_at: '2024-02-15'
+});
+```
+
+**3. Refund Management:**
+```javascript
+// Issue refund to account balance
+await createBalance({
+  user_id: 'user_123',
+  reference_code: 'refund_balance',
+  balance_type: 'refund',
+  initial_balance_cents: 3000
+});
+```
+
+**4. Mixed Payments (Balance + Card):**
+```javascript
+// Pay $50 total: $20 from wallet, $30 from card
+await mixedPayment({
+  user_id: 'user_123',
+  total_amount_cents: 5000,
+  balance_amount_cents: 2000,
+  balance_reference_code: 'main_wallet',
+  payment_method_id: 'pm_123'
+});
+```
+
+**Full Documentation:** [Account Balance Guide](./account-balance.md)
+
+---
+
+### 📅 **Billing Schedules**
+
+**Perfect for:** Automated recurring billing, installment plans, subscription services
+
+**When to use:**
+- ✅ You need automated recurring billing
+- ✅ You want flexible payment sources (balance first, then card)
+- ✅ You offer installment plans
+- ✅ You charge recurring fees
+- ✅ You need custom billing intervals
+
+**Tables you need:**
+```sql
+✅ billing_schedules
+✅ billing_schedule_executions
+```
+
+**Example use cases:**
+
+**1. Monthly Membership with Balance-First Payment:**
+```javascript
+// Charge $9.99/month, try wallet first, then card
+await createBillingSchedule({
+  user_id: 'user_123',
+  schedule_type: 'recurring',
+  amount_cents: 999,
+  billing_interval: 'monthly',
+  payment_priority: 'balance_first',
+  account_balance_id: 'bal_123',
+  payment_method_id: 'pm_456',
+  description: 'Premium Membership'
+});
+```
+
+**2. 6-Month Installment Plan:**
+```javascript
+// $300 total, paid in 6 monthly installments of $50
+await createBillingSchedule({
+  user_id: 'user_123',
+  amount_cents: 5000,
+  billing_interval: 'monthly',
+  start_date: '2024-01-01',
+  end_date: '2024-06-01',
+  category: 'installment',
+  description: 'Course payment plan'
+});
+```
+
+**3. Quarterly Subscription:**
+```javascript
+// Charge every 3 months
+await createBillingSchedule({
+  user_id: 'user_123',
+  amount_cents: 2999,
+  billing_interval: 'monthly',
+  interval_multiplier: 3,  // Every 3 months
+  description: 'Quarterly subscription'
+});
+```
+
+**4. Cron Job Processing:**
+```javascript
+// Run this daily via cron
+await processDueBillingSchedules();
+// Automatically charges all schedules that are due
+```
+
+**Full Documentation:** [Billing Schedules Guide](./billing-schedules.md)
+
+---
+
+### 🧾 **Invoices & Receipts**
+
+**Perfect for:** B2B businesses, service providers, professional billing
+
+**When to use:**
+- ✅ You need to send invoices before payment
+- ✅ You want to generate receipts after payment
+- ✅ You handle guest payments with billing documents
+- ✅ You need professional billing documents
+- ✅ You track invoice status (paid, unpaid, overdue)
+
+**Tables you need:**
+```sql
+✅ invoices (already exists in core)
+✅ receipts (new)
+```
+
+**Example use cases:**
+
+**1. Service Invoice with Payment Link:**
+```javascript
+// Create invoice for consulting services
+const invoice = await createInvoice({
+  user_id: 'user_123',
+  line_items: [
+    {
+      description: 'Web Development - 10 hours',
+      quantity: 10,
+      unit_price_cents: 5000,
+      total_cents: 50000
+    }
+  ],
+  subtotal_cents: 50000,
+  tax_cents: 4000,
+  total_cents: 54000,
+  due_date: '2024-02-15'
+});
+
+// Send invoice to customer
+await sendInvoice(invoice.id);
+// Customer receives email with payment link
+```
+
+**2. Automatic Receipt Generation:**
+```javascript
+// After payment succeeds, create receipt
+await createReceipt({
+  payment_id: 'pay_456',
+  invoice_id: 'inv_123',
+  user_id: 'user_123',
+  customer_name: 'John Doe',
+  customer_email: 'john@example.com',
+  line_items: [...],
+  total_cents: 54000
+});
+```
+
+**3. Guest Invoice:**
+```javascript
+// Invoice for guest customer (no account)
+await createGuestInvoice({
+  guest_email: 'customer@example.com',
+  guest_data: {
+    name: 'Jane Smith',
+    company: 'Acme Corp'
+  },
+  line_items: [...],
+  total_cents: 150000,
+  due_date: '2024-02-28'
+});
+```
+
+**4. Invoice Status Tracking:**
+```javascript
+// Get overdue invoices
+const overdueInvoices = await getInvoices({
+  status: 'overdue'
+});
+
+// Send payment reminders
+for (const invoice of overdueInvoices) {
+  await sendPaymentReminder(invoice);
+}
+```
+
+**Full Documentation:** [Invoices & Receipts Guide](./invoices-receipts.md)
+
+---
+
+### 🔗 **Combining Optional Features**
+
+**E-commerce with Full Features:**
+```sql
+✅ Core tables (users, products, orders, payments)
+✅ Cost Tracking (profit analysis)
+✅ Account Balance (customer wallets)
+✅ Receipts (professional documentation)
+```
+
+**SaaS Platform:**
+```sql
+✅ Core tables (users, subscriptions, payments)
+✅ Account Balance (credits system)
+✅ Billing Schedules (automated billing)
+✅ Invoices & Receipts (B2B invoicing)
+```
+
+**Service Business:**
+```sql
+✅ Core tables (users, payments)
+✅ Cost Tracking (service costs)
+✅ Invoices & Receipts (client billing)
+```
+
+**Marketplace:**
+```sql
+✅ Core tables (users, organizations, orders, payments)
+✅ Cost Tracking (seller costs)
+✅ Account Balance (seller payouts)
+✅ Receipts (transaction records)
+```
+
+---
+
 ## 🤔 **Still Not Sure?**
 
 ### Ask yourself:
 
 **Do you sell physical/digital products?** → E-commerce tables
-**Do you charge monthly/yearly?** → Subscription tables  
+**Do you charge monthly/yearly?** → Subscription tables
 **Do you control access to features?** → Membership tables
 **Do you serve businesses?** → Organization tables
 **Do you want business insights?** → Analytics tables
+
+**Optional Features:**
+**Do you need profit analysis?** → Cost Tracking
+**Do you want customer wallets?** → Account Balance
+**Do you need automated billing?** → Billing Schedules
+**Do you send invoices/receipts?** → Invoices & Receipts
 
 ### Start with the minimum and add tables as you need them!
 

@@ -598,3 +598,449 @@ This endpoint is called by the payment provider and processes events asynchronou
   "received": true
 }
 ```
+
+---
+
+## Optional Features
+
+The following API routes are for optional features. Each feature can be implemented independently.
+
+### Cost Tracking (Optional Feature)
+
+Track product costs and calculate profit margins.
+
+**Full Documentation:** [Cost Tracking Guide](./cost-tracking.md)
+
+#### Create Product Cost
+
+```
+POST /api/v1/costs/products/:product_id/costs
+```
+
+**Request Body:**
+```json
+{
+  "cost_type": "per_unit",
+  "cost_per_unit_cents": 1200,
+  "overhead_percentage": 15,
+  "cost_category": "production",
+  "effective_from": "2024-01-01T00:00:00Z"
+}
+```
+
+#### Calculate Order Cost
+
+```
+POST /api/v1/costs/orders/:order_id/calculate
+```
+
+**Response:**
+```json
+{
+  "order_id": "order_123",
+  "total_cost_cents": 3300,
+  "base_cost_cents": 2870,
+  "overhead_cost_cents": 430
+}
+```
+
+#### Get Profitability Report
+
+```
+GET /api/v1/costs/reports/profitability?start_date=2024-01-01&end_date=2024-01-31
+```
+
+**Response:**
+```json
+{
+  "total_revenue_cents": 50000,
+  "total_cost_cents": 33000,
+  "total_profit_cents": 17000,
+  "profit_margin_percentage": 34
+}
+```
+
+---
+
+### Account Balance (Optional Feature)
+
+Customer wallets, credits, and prepayment systems.
+
+**Full Documentation:** [Account Balance Guide](./account-balance.md)
+
+#### Create Balance
+
+```
+POST /api/v1/balances
+```
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "reference_code": "main_wallet",
+  "balance_type": "general",
+  "currency": "USD"
+}
+```
+
+#### Credit Balance
+
+```
+POST /api/v1/balances/:balance_id/credit
+```
+
+**Request Body:**
+```json
+{
+  "amount_cents": 1000,
+  "description": "Promotional credit",
+  "reference_code": "promo_jan2024"
+}
+```
+
+#### Debit Balance
+
+```
+POST /api/v1/balances/:balance_id/debit
+```
+
+**Request Body:**
+```json
+{
+  "amount_cents": 500,
+  "description": "Payment for order #123",
+  "order_id": "order_123"
+}
+```
+
+#### Get Balance
+
+```
+GET /api/v1/balances/:balance_id
+```
+
+**Response:**
+```json
+{
+  "id": "bal_123",
+  "user_id": "user_123",
+  "reference_code": "main_wallet",
+  "current_balance_cents": 5000,
+  "currency": "USD",
+  "status": "active"
+}
+```
+
+#### Get User Balances
+
+```
+GET /api/v1/balances/user/:user_id
+```
+
+#### Pay with Balance
+
+```
+POST /api/v1/payments/with-balance
+```
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "balance_reference_code": "main_wallet",
+  "amount_cents": 2000,
+  "order_id": "order_456"
+}
+```
+
+#### Mixed Payment (Balance + Card)
+
+```
+POST /api/v1/payments/mixed
+```
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "total_amount_cents": 5000,
+  "balance_amount_cents": 2000,
+  "balance_reference_code": "main_wallet",
+  "payment_method_id": "pm_123",
+  "order_id": "order_789"
+}
+```
+
+---
+
+### Billing Schedules (Optional Feature)
+
+Automated recurring billing with flexible payment sources.
+
+**Full Documentation:** [Billing Schedules Guide](./billing-schedules.md)
+
+#### Create Billing Schedule
+
+```
+POST /api/v1/billing-schedules
+```
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "schedule_type": "recurring",
+  "amount_cents": 999,
+  "billing_interval": "monthly",
+  "start_date": "2024-01-01T00:00:00Z",
+  "payment_method_id": "pm_123",
+  "description": "Monthly membership"
+}
+```
+
+#### Get Billing Schedule
+
+```
+GET /api/v1/billing-schedules/:id
+```
+
+#### Update Billing Schedule
+
+```
+PATCH /api/v1/billing-schedules/:id
+```
+
+**Request Body:**
+```json
+{
+  "status": "paused",
+  "amount_cents": 1499
+}
+```
+
+#### Execute Billing Schedule
+
+```
+POST /api/v1/billing-schedules/:id/execute
+```
+
+**Response:**
+```json
+{
+  "execution_id": "exec_123",
+  "status": "success",
+  "amount_charged_cents": 999,
+  "payment_id": "pay_456"
+}
+```
+
+#### Process Due Schedules (Cron Job)
+
+```
+POST /api/v1/billing-schedules/process-due
+```
+
+**Response:**
+```json
+{
+  "processed": 15,
+  "successful": 12,
+  "failed": 3
+}
+```
+
+#### Get User Billing Schedules
+
+```
+GET /api/v1/billing-schedules/user/:user_id
+```
+
+#### Cancel Billing Schedule
+
+```
+POST /api/v1/billing-schedules/:id/cancel
+```
+
+---
+
+### Invoices & Receipts (Optional Feature)
+
+Universal billing system with pre-payment invoices and post-payment receipts.
+
+**Full Documentation:** [Invoices & Receipts Guide](./invoices-receipts.md)
+
+#### Create Invoice
+
+```
+POST /api/v1/invoices
+```
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "line_items": [
+    {
+      "description": "Premium Subscription",
+      "quantity": 1,
+      "unit_price_cents": 2999,
+      "total_cents": 2999
+    }
+  ],
+  "subtotal_cents": 2999,
+  "tax_cents": 240,
+  "total_cents": 3239,
+  "currency": "USD",
+  "due_date": "2024-02-15T23:59:59Z"
+}
+```
+
+#### Get Invoice
+
+```
+GET /api/v1/invoices/:id
+```
+
+#### Get User Invoices
+
+```
+GET /api/v1/invoices/user/:user_id?status=paid&limit=10
+```
+
+#### Update Invoice
+
+```
+PATCH /api/v1/invoices/:id
+```
+
+**Request Body:**
+```json
+{
+  "status": "sent",
+  "notes": "Payment due within 30 days"
+}
+```
+
+#### Send Invoice
+
+```
+POST /api/v1/invoices/:id/send
+```
+
+#### Mark Invoice as Paid
+
+```
+POST /api/v1/invoices/:id/mark-paid
+```
+
+**Request Body:**
+```json
+{
+  "payment_id": "pay_456",
+  "payment_method_type": "credit_card"
+}
+```
+
+#### Void Invoice
+
+```
+POST /api/v1/invoices/:id/void
+```
+
+#### Create Guest Invoice
+
+```
+POST /api/v1/invoices/guest
+```
+
+**Request Body:**
+```json
+{
+  "guest_email": "customer@example.com",
+  "guest_data": {
+    "name": "Jane Smith",
+    "company": "Acme Corp"
+  },
+  "line_items": [...],
+  "total_cents": 5000
+}
+```
+
+#### Create Receipt
+
+```
+POST /api/v1/receipts
+```
+
+**Request Body:**
+```json
+{
+  "payment_id": "pay_456",
+  "invoice_id": "inv_123",
+  "user_id": "user_123",
+  "subtotal_cents": 2999,
+  "tax_cents": 240,
+  "total_cents": 3239,
+  "customer_name": "John Doe",
+  "customer_email": "john@example.com"
+}
+```
+
+#### Get Receipt
+
+```
+GET /api/v1/receipts/:id
+```
+
+#### Get Receipt by Payment
+
+```
+GET /api/v1/receipts/payment/:payment_id
+```
+
+#### Get User Receipts
+
+```
+GET /api/v1/receipts/user/:user_id?limit=10
+```
+
+#### Void Receipt
+
+```
+POST /api/v1/receipts/:id/void
+```
+
+---
+
+## API Versioning
+
+All optional feature endpoints use `/api/v1/` prefix for versioning. Core payment endpoints use `/api/payment/` prefix.
+
+## Authentication
+
+All endpoints require authentication via session token or API key. See main documentation for authentication details.
+
+## Rate Limiting
+
+API endpoints are rate-limited to prevent abuse. Default limits:
+- 100 requests per minute for read operations
+- 30 requests per minute for write operations
+- 10 requests per minute for billing schedule processing
+
+## Error Responses
+
+All endpoints follow standard error response format:
+
+```json
+{
+  "error": {
+    "code": "INSUFFICIENT_BALANCE",
+    "message": "Account balance is insufficient for this transaction",
+    "details": {
+      "required_cents": 5000,
+      "available_cents": 2000
+    }
+  }
+}
+```

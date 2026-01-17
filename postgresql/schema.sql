@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     organization_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
     provider_payment_method_id VARCHAR(255) NOT NULL, -- ID from the provider
-    provider_customer_id VARCHAR(255), -- Direct link to provider_customers.id for better performance
+    customer_id VARCHAR(255), -- Direct link to external_entities.id for better performance
     payment_type VARCHAR(50) NOT NULL, -- 'credit_card', 'bank_account', 'paypal', 'wallet', etc.
     wallet_type VARCHAR(50), -- 'apple_pay', 'google_pay', 'samsung_pay', etc. (only for wallet payment types)
     last_four VARCHAR(4), -- Last 4 digits of card or account
@@ -314,7 +314,7 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    FOREIGN KEY (provider_customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
 );
@@ -382,7 +382,7 @@ CREATE TABLE IF NOT EXISTS orders (
     order_number VARCHAR(255) UNIQUE NOT NULL, -- Human-readable order number
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255), -- References provider_customers table (supports registered guests)
+    customer_id VARCHAR(255), -- References external_entities table (supports registered guests)
 
     -- Anonymous guest support
     is_guest_order BOOLEAN NOT NULL DEFAULT false, -- Track if this was an anonymous guest order
@@ -403,7 +403,7 @@ CREATE TABLE IF NOT EXISTS orders (
     completed_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = true), -- Must belong to a user, organization, customer, or be an anonymous guest order
     CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
@@ -431,7 +431,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255) NOT NULL, -- References provider_customers table (supports both users and guests)
+    customer_id VARCHAR(255) NOT NULL, -- References external_entities table (supports both users and guests)
     product_id VARCHAR(255), -- Optional for custom donations/flexible subscriptions
     payment_method_id VARCHAR(255),
     provider_id VARCHAR(50) NOT NULL,
@@ -474,7 +474,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
@@ -566,7 +566,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     payment_id VARCHAR(255), -- Optional reference to payment (updated after payment completion)
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
-    customer_id VARCHAR(255), -- References provider_customers table (supports both users and guests)
+    customer_id VARCHAR(255), -- References external_entities table (supports both users and guests)
 
     status VARCHAR(50) NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
 
@@ -619,7 +619,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
-    FOREIGN KEY (customer_id) REFERENCES provider_customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
 
@@ -712,14 +712,11 @@ CREATE INDEX idx_addresses_user_id ON addresses(user_id);
 CREATE INDEX idx_addresses_organization_id ON addresses(organization_id);
 CREATE INDEX idx_addresses_type ON addresses(address_type);
 
-CREATE INDEX idx_provider_customers_user_id ON provider_customers(user_id);
-CREATE INDEX idx_provider_customers_organization_id ON provider_customers(organization_id);
-CREATE INDEX idx_provider_customers_is_guest ON provider_customers(is_guest);
-CREATE INDEX idx_provider_customers_guest_email ON provider_customers(guest_email);
+
 
 CREATE INDEX idx_payment_methods_user_id ON payment_methods(user_id);
 CREATE INDEX idx_payment_methods_organization_id ON payment_methods(organization_id);
-CREATE INDEX idx_payment_methods_provider_customer_id ON payment_methods(provider_customer_id);
+CREATE INDEX idx_payment_methods_customer_id ON payment_methods(customer_id);
 CREATE INDEX idx_payment_methods_is_guest ON payment_methods(is_guest);
 CREATE INDEX idx_payment_methods_guest_email ON payment_methods(guest_email);
 CREATE INDEX idx_payment_methods_alias ON payment_methods(alias);

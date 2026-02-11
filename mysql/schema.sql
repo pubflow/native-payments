@@ -527,6 +527,7 @@ CREATE TABLE IF NOT EXISTS membership_types (
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     features JSON, -- JSON array of features included in this membership
     is_active BOOLEAN NOT NULL DEFAULT true,
+    metadata JSON, -- JSON object for additional membership type information
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -534,7 +535,8 @@ CREATE TABLE IF NOT EXISTS membership_types (
 -- User Memberships
 CREATE TABLE IF NOT EXISTS user_memberships (
     id VARCHAR(255) PRIMARY KEY,
-    user_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
     membership_type_id VARCHAR(255) NOT NULL,
     subscription_id VARCHAR(255), -- For recurring memberships
     order_id VARCHAR(255), -- For one-time purchases
@@ -543,12 +545,17 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     end_date TIMESTAMP, -- NULL for lifetime memberships
     auto_renew BOOLEAN NOT NULL DEFAULT false,
     addons JSON, -- JSON array of purchased addons with their expiration dates
+    cancelled_at TIMESTAMP NULL, -- When the membership was cancelled
+    cancellation_reason VARCHAR(255) NULL, -- Reason for cancellation
+    metadata JSON, -- JSON object for additional membership information
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (membership_type_id) REFERENCES membership_types(id) ON DELETE RESTRICT,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
 );
 
 -- ========================================
@@ -703,7 +710,12 @@ CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
 
 CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
+CREATE INDEX idx_user_memberships_organization_id ON user_memberships(organization_id);
 CREATE INDEX idx_user_memberships_status ON user_memberships(status);
+CREATE INDEX idx_user_memberships_membership_type_id ON user_memberships(membership_type_id);
+CREATE INDEX idx_user_memberships_subscription_id ON user_memberships(subscription_id);
+CREATE INDEX idx_user_memberships_end_date ON user_memberships(end_date);
+CREATE INDEX idx_user_memberships_cancelled_at ON user_memberships(cancelled_at);
 
 CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
 

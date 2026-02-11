@@ -112,6 +112,8 @@ Returns all memberships for a specific user.
     "auto_renew": true,
     "subscription_id": "sub_789012",
     "order_id": null,
+    "cancelled_at": null,
+    "cancellation_reason": null,
     "addons": [
       {
         "feature_id": "family_sharing",
@@ -156,6 +158,8 @@ Returns details for a specific user membership.
   "auto_renew": true,
   "subscription_id": "sub_789012",
   "order_id": null,
+  "cancelled_at": null,
+  "cancellation_reason": null,
   "addons": [
     {
       "feature_id": "family_sharing",
@@ -206,6 +210,8 @@ Creates a new membership for a user.
   "auto_renew": true,
   "subscription_id": "sub_789012",
   "order_id": null,
+  "cancelled_at": null,
+  "cancellation_reason": null,
   "addons": [],
   "membership_type": {
     "id": "premium_monthly",
@@ -242,10 +248,19 @@ Cancels a user's membership.
 }
 ```
 
+**Request Body (Optional):**
+```json
+{
+  "reason": "too_expensive" // Optional: reason for cancellation
+}
+```
+
 **Notes:**
 - For recurring memberships, this endpoint cancels the associated subscription
 - The membership status is updated to "cancelled"
 - Auto-renew is set to false
+- The `cancelled_at` timestamp is recorded
+- An optional `cancellation_reason` can be provided for tracking
 
 ### Add-ons
 
@@ -555,7 +570,56 @@ Features are defined in a configuration file with the following structure:
 }
 ```
 
+## Data Models
+
+### User Membership Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier for the membership |
+| `user_id` | string | ID of the user who owns this membership |
+| `membership_type_id` | string | ID of the membership type |
+| `subscription_id` | string \| null | ID of the associated subscription (for recurring memberships) |
+| `order_id` | string \| null | ID of the associated order (for one-time purchases) |
+| `status` | string | Current status: `'active'`, `'expired'`, `'cancelled'`, `'pending'` |
+| `start_date` | string (ISO 8601) | When the membership started |
+| `end_date` | string (ISO 8601) \| null | When the membership expires (null for lifetime) |
+| `auto_renew` | boolean | Whether the membership will auto-renew |
+| `addons` | array | List of purchased add-on features |
+| `cancelled_at` | string (ISO 8601) \| null | Timestamp when the membership was cancelled |
+| `cancellation_reason` | string \| null | Reason for cancellation (e.g., `'too_expensive'`, `'not_using'`, `'switching_provider'`) |
+| `created_at` | string (ISO 8601) | When the membership was created |
+| `updated_at` | string (ISO 8601) | When the membership was last updated |
+
+### Membership Type Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier for the membership type |
+| `name` | string | Display name of the membership type |
+| `description` | string | Detailed description |
+| `duration_type` | string | Type of duration: `'recurring'`, `'fixed'`, `'lifetime'` |
+| `duration_days` | number \| null | Number of days the membership lasts (null for lifetime) |
+| `price_cents` | number | Price in cents |
+| `currency` | string | Currency code (e.g., `'USD'`) |
+| `features` | array | List of feature IDs included in this membership |
+| `is_active` | boolean | Whether this membership type is currently available |
+
+### Common Cancellation Reasons
+
+The following are recommended values for `cancellation_reason`:
+
+- `too_expensive` - Price is too high
+- `not_using` - Not using the service enough
+- `switching_provider` - Moving to a different service
+- `missing_features` - Desired features not available
+- `technical_issues` - Problems with the service
+- `temporary_pause` - Taking a break, may return later
+- `duplicate_subscription` - Has another subscription
+- `other` - Other reason (can include details in metadata)
+
 ## Integration with Payment System
+
 
 The membership system integrates with the Native Payments system in the following ways:
 

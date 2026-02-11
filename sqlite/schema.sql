@@ -686,6 +686,7 @@ CREATE TABLE IF NOT EXISTS membership_types (
     currency TEXT NOT NULL DEFAULT 'USD',
     features TEXT, -- JSON array of features included in this membership
     is_active INTEGER NOT NULL DEFAULT 1,
+    metadata TEXT, -- JSON object for additional membership type information
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -700,7 +701,8 @@ END;
 -- User Memberships
 CREATE TABLE IF NOT EXISTS user_memberships (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
+    user_id TEXT,
+    organization_id TEXT,
     membership_type_id TEXT NOT NULL,
     subscription_id TEXT, -- For recurring memberships
     order_id TEXT, -- For one-time purchases
@@ -709,12 +711,17 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     end_date TEXT, -- NULL for lifetime memberships
     auto_renew INTEGER NOT NULL DEFAULT 0,
     addons TEXT, -- JSON array of purchased addons with their expiration dates
+    cancelled_at TEXT NULL, -- When the membership was cancelled
+    cancellation_reason TEXT NULL, -- Reason for cancellation
+    metadata TEXT, -- JSON object for additional membership information
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (membership_type_id) REFERENCES membership_types(id) ON DELETE RESTRICT,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
 );
 
 -- Trigger for updated_at on user_memberships

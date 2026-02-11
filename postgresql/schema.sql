@@ -664,6 +664,7 @@ CREATE TABLE IF NOT EXISTS membership_types (
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     features JSONB, -- Array de features incluidas en esta membresía
     is_active BOOLEAN NOT NULL DEFAULT true,
+    metadata JSONB, -- JSON object for additional membership type information
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -676,7 +677,8 @@ EXECUTE FUNCTION update_timestamp();
 -- User Memberships
 CREATE TABLE IF NOT EXISTS user_memberships (
     id VARCHAR(255) PRIMARY KEY,
-    user_id VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
     membership_type_id VARCHAR(255) NOT NULL,
     subscription_id VARCHAR(255), -- Para membresías recurrentes
     order_id VARCHAR(255), -- Para compras únicas
@@ -685,12 +687,17 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     end_date TIMESTAMP, -- NULL para membresías de por vida
     auto_renew BOOLEAN NOT NULL DEFAULT false,
     addons JSONB, -- Array de addons comprados con sus fechas de expiración
+    cancelled_at TIMESTAMP NULL, -- When the membership was cancelled
+    cancellation_reason VARCHAR(255) NULL, -- Reason for cancellation
+    metadata JSONB, -- JSON object for additional membership information
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (membership_type_id) REFERENCES membership_types(id) ON DELETE RESTRICT,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
 );
 
 CREATE TRIGGER update_user_memberships_timestamp

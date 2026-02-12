@@ -95,6 +95,39 @@ CREATE TABLE IF NOT EXISTS organization_users (
     UNIQUE KEY (organization_id, user_id)
 );
 
+-- Projects (Universal Entity for hierarchical billing/management)
+CREATE TABLE IF NOT EXISTS projects (
+    id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) NOT NULL UNIQUE, -- URL-friendly identifier
+    description TEXT,
+    picture TEXT, -- Project logo/icon
+    
+    -- Ownership (Can belong to User or Organization)
+    user_id VARCHAR(255),
+    organization_id VARCHAR(255),
+    
+    -- Billing Context
+    billing_account_id VARCHAR(255), -- ID of the entity responsible for billing
+    billing_email VARCHAR(255),
+    billing_currency VARCHAR(3) DEFAULT 'USD',
+    
+    -- Metadata & Status
+    metadata JSON,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+);
+
+-- Project Indexes
+CREATE INDEX idx_projects_user_id ON projects(user_id);
+CREATE INDEX idx_projects_organization_id ON projects(organization_id);
+CREATE INDEX idx_projects_billing_account ON projects(billing_account_id);
+
 -- Payment Providers
 CREATE TABLE IF NOT EXISTS payment_providers (
     id VARCHAR(50) PRIMARY KEY, -- 'stripe', 'paypal', 'authorize_net', etc.
@@ -114,6 +147,7 @@ CREATE TABLE IF NOT EXISTS external_entities (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    project_id VARCHAR(255), -- Link to Project
 
     -- CONTEXT FIELDS (primary classification)
     context_type VARCHAR(50) NOT NULL DEFAULT 'payment',  -- 'payment', 'newsletter', 'events', etc.
@@ -140,6 +174,7 @@ CREATE TABLE IF NOT EXISTS external_entities (
     -- FOREIGN KEYS WITH PROPER REFERENCES
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (payment_provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_entity_id) REFERENCES external_entities(id) ON DELETE SET NULL,
 
@@ -148,10 +183,10 @@ CREATE TABLE IF NOT EXISTS external_entities (
 
 -- Create partial unique indexes to enforce conditional uniqueness
 CREATE UNIQUE INDEX idx_external_entities_user_unique
-ON external_entities (user_id, organization_id, payment_provider_id, context_type);
+ON external_entities (user_id, organization_id, project_id, payment_provider_id, context_type);
 
 CREATE UNIQUE INDEX idx_external_entities_email_unique
-ON external_entities (external_email, organization_id, payment_provider_id, context_type);
+ON external_entities (external_email, organization_id, project_id, payment_provider_id, context_type);
 
 -- Addresses
 CREATE TABLE IF NOT EXISTS addresses (
@@ -532,11 +567,12 @@ CREATE TABLE IF NOT EXISTS membership_types (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- User Memberships
-CREATE TABLE IF NOT EXISTS user_memberships (
+-- Entity Memberships (formerly User Memberships)
+CREATE TABLE IF NOT EXISTS entity_memberships (
     id VARCHAR(255) PRIMARY KEY,
     user_id VARCHAR(255),
     organization_id VARCHAR(255),
+    project_id VARCHAR(255), -- Link to Project
     membership_type_id VARCHAR(255) NOT NULL,
     subscription_id VARCHAR(255), -- For recurring memberships
     order_id VARCHAR(255), -- For one-time purchases
@@ -552,10 +588,11 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (membership_type_id) REFERENCES membership_types(id) ON DELETE RESTRICT,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL)
 );
 
 -- ========================================

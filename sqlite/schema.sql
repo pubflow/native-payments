@@ -188,6 +188,47 @@ BEGIN
     UPDATE organization_users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
+-- Projects (Universal Entity for hierarchical billing/management)
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE, -- URL-friendly identifier
+    description TEXT,
+    picture TEXT, -- Project logo/icon
+    
+    -- Ownership (Can belong to User or Organization)
+    user_id TEXT,
+    organization_id TEXT,
+    
+    -- Billing Context
+    billing_account_id TEXT, -- ID of the entity responsible for billing (could be User ID, Org ID, or External ID)
+    billing_email TEXT,      -- Specific email for billing notifications for this project
+    billing_currency TEXT DEFAULT 'USD',
+    
+    -- Metadata & Status
+    metadata TEXT, -- JSON string
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+);
+
+-- Trigger for updated_at on projects
+CREATE TRIGGER IF NOT EXISTS update_projects_timestamp
+AFTER UPDATE ON projects
+BEGIN
+    UPDATE projects SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Project Indexes
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_organization_id ON projects(organization_id);
+CREATE INDEX IF NOT EXISTS idx_projects_billing_account ON projects(billing_account_id);
+
+
 -- Addresses
 CREATE TABLE IF NOT EXISTS addresses (
     id TEXT PRIMARY KEY,
@@ -249,6 +290,7 @@ CREATE TABLE IF NOT EXISTS external_entities (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
 
     -- CONTEXT FIELDS (primary classification)
     context_type TEXT NOT NULL DEFAULT 'payment',  -- 'payment', 'newsletter', 'events', etc.
@@ -275,19 +317,20 @@ CREATE TABLE IF NOT EXISTS external_entities (
     -- FOREIGN KEYS WITH PROPER REFERENCES
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (payment_provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_entity_id) REFERENCES external_entities(id) ON DELETE SET NULL,
-
     CHECK (user_id IS NOT NULL OR external_email IS NOT NULL) -- Either user_id or external_email must be provided
 );
 
 -- Create partial unique indexes to enforce conditional uniqueness
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_entities_user_unique
-ON external_entities (user_id, organization_id, payment_provider_id, context_type)
+ON external_entities (user_id, organization_id, project_id, payment_provider_id, context_type)
 WHERE user_id IS NOT NULL AND payment_provider_id IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_entities_email_unique
-ON external_entities (external_email, organization_id, payment_provider_id, context_type)
+ON external_entities (external_email, organization_id, project_id, payment_provider_id, context_type)
 WHERE user_id IS NULL AND external_email IS NOT NULL AND payment_provider_id IS NOT NULL;
 
 -- Trigger for updated_at on external_entities
@@ -698,11 +741,12 @@ BEGIN
     UPDATE membership_types SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
--- User Memberships
-CREATE TABLE IF NOT EXISTS user_memberships (
+-- Entity Memberships (formerly User Memberships)
+CREATE TABLE IF NOT EXISTS entity_memberships (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project (for project-based billing)
     membership_type_id TEXT NOT NULL,
     subscription_id TEXT, -- For recurring memberships
     order_id TEXT, -- For one-time purchases
@@ -711,24 +755,25 @@ CREATE TABLE IF NOT EXISTS user_memberships (
     end_date TEXT, -- NULL for lifetime memberships
     auto_renew INTEGER NOT NULL DEFAULT 0,
     addons TEXT, -- JSON array of purchased addons with their expiration dates
-    cancelled_at TEXT NULL, -- When the membership was cancelled
-    cancellation_reason TEXT NULL, -- Reason for cancellation
+    cancelled_at TEXT, -- When the membership was cancelled
+    cancellation_reason TEXT, -- Reason for cancellation
     metadata TEXT, -- JSON object for additional membership information
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (membership_type_id) REFERENCES membership_types(id) ON DELETE RESTRICT,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL)
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL)
 );
 
--- Trigger for updated_at on user_memberships
-CREATE TRIGGER IF NOT EXISTS update_user_memberships_timestamp
-AFTER UPDATE ON user_memberships
+-- Trigger for updated_at on entity_memberships
+CREATE TRIGGER IF NOT EXISTS update_entity_memberships_timestamp
+AFTER UPDATE ON entity_memberships
 BEGIN
-    UPDATE user_memberships SET updated_at = datetime('now') WHERE id = NEW.id;
+    UPDATE entity_memberships SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
 -- Indexes for performance
@@ -810,8 +855,14 @@ CREATE INDEX idx_payment_webhooks_provider_id ON payment_webhooks(provider_id);
 CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
 
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
-CREATE INDEX idx_user_memberships_user_id ON user_memberships(user_id);
-CREATE INDEX idx_user_memberships_status ON user_memberships(status);
+CREATE INDEX idx_entity_memberships_user_id ON entity_memberships(user_id);
+CREATE INDEX idx_entity_memberships_organization_id ON entity_memberships(organization_id);
+CREATE INDEX idx_entity_memberships_project_id ON entity_memberships(project_id);
+CREATE INDEX idx_entity_memberships_status ON entity_memberships(status);
+CREATE INDEX idx_entity_memberships_membership_type_id ON entity_memberships(membership_type_id);
+CREATE INDEX idx_entity_memberships_subscription_id ON entity_memberships(subscription_id);
+CREATE INDEX idx_entity_memberships_end_date ON entity_memberships(end_date);
+CREATE INDEX idx_entity_memberships_cancelled_at ON entity_memberships(cancelled_at);
 CREATE INDEX idx_membership_types_is_active ON membership_types(is_active);
 
 -- Analytics Tables (Optional Feature)

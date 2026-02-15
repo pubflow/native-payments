@@ -229,6 +229,46 @@ CREATE INDEX IF NOT EXISTS idx_projects_organization_id ON projects(organization
 CREATE INDEX IF NOT EXISTS idx_projects_billing_account ON projects(billing_account_id);
 
 
+-- Project Members (Universal Access Control)
+CREATE TABLE IF NOT EXISTS project_members (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    
+    -- Universal Role (native-payments compatibility)
+    role TEXT NOT NULL DEFAULT 'member', -- 'owner', 'admin', 'editor', 'viewer', 'member'
+    
+    -- Invitation & Status System
+    status TEXT NOT NULL DEFAULT 'pending', -- 'active', 'pending', 'suspended', 'invited'
+    invited_by TEXT,
+    invitation_token TEXT,
+    invitation_token_expires_at TEXT,
+    
+    joined_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
+    
+    -- Ensure user is unique per project
+    UNIQUE(project_id, user_id)
+);
+
+-- Trigger for updated_at on project_members
+CREATE TRIGGER IF NOT EXISTS update_project_members_timestamp
+AFTER UPDATE ON project_members
+BEGIN
+    UPDATE project_members SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+
+-- Project Members Indexes
+CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_user_id ON project_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_invitation_token ON project_members(invitation_token);
+
+
 -- Addresses
 CREATE TABLE IF NOT EXISTS addresses (
     id TEXT PRIMARY KEY,
@@ -439,6 +479,7 @@ CREATE TABLE IF NOT EXISTS orders (
     order_number TEXT UNIQUE NOT NULL, -- Human-readable order number
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
     customer_id TEXT, -- References external_entities table (supports registered guests)
 
     -- Anonymous guest support
@@ -460,8 +501,9 @@ CREATE TABLE IF NOT EXISTS orders (
     completed_at TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1), -- Must belong to a user, organization, customer, or be an anonymous guest order
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_order = 1), -- Must belong to a user, organization, project, customer, or be an anonymous guest order
     CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
@@ -490,6 +532,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
     customer_id TEXT NOT NULL, -- References external_entities table (supports both users and guests)
     product_id TEXT, -- Optional for custom donations/flexible subscriptions
     payment_method_id TEXT,
@@ -533,11 +576,12 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     guest_email TEXT, -- Extracted guest email for indexing and queries
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_subscription = 1), -- Must belong to a user, organization, have a customer, or be guest subscription
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_subscription = 1), -- Must belong to a user, organization, project, have a customer, or be guest subscription
     CHECK (billing_interval IN ('daily', 'weekly', 'monthly', 'yearly')),
     CHECK (interval_multiplier IS NULL OR (interval_multiplier > 0 AND interval_multiplier <= 12)),
     CHECK (billing_status IN ('active', 'past_due', 'suspended', 'cancelled')),
@@ -631,6 +675,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     payment_id TEXT, -- Optional reference to payment (updated after payment completion)
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
     customer_id TEXT, -- References external_entities table (supports both users and guests)
 
     status TEXT NOT NULL, -- 'draft', 'open', 'paid', 'void', 'uncollectible'
@@ -684,11 +729,12 @@ CREATE TABLE IF NOT EXISTS invoices (
     FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE SET NULL,
 
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_invoice = 1),
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_invoice = 1),
     CHECK (total_cents = subtotal_cents + tax_cents - discount_cents) -- Pricing validation
 );
 
@@ -1304,6 +1350,7 @@ CREATE TABLE IF NOT EXISTS account_balances (
     id TEXT PRIMARY KEY,
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
     customer_id TEXT, -- For registered guests
 
     -- NEW: Segment balances by context/purpose
@@ -1331,10 +1378,11 @@ CREATE TABLE IF NOT EXISTS account_balances (
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE CASCADE,
 
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL),
-    UNIQUE (user_id, organization_id, customer_id, currency, reference_code)
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL OR customer_id IS NOT NULL),
+    UNIQUE (user_id, organization_id, project_id, customer_id, currency, reference_code)
 );
 
 -- Trigger for updated_at on account_balances
@@ -1546,6 +1594,7 @@ CREATE TABLE IF NOT EXISTS receipts (
     subscription_id TEXT,
     user_id TEXT,
     organization_id TEXT,
+    project_id TEXT, -- Link to Project
     customer_id TEXT,
 
     -- Amounts (reflect what was PAID)
@@ -1593,10 +1642,11 @@ CREATE TABLE IF NOT EXISTS receipts (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
     FOREIGN KEY (customer_id) REFERENCES external_entities(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
 
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_receipt = 1),
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR project_id IS NOT NULL OR customer_id IS NOT NULL OR is_guest_receipt = 1),
     CHECK (total_cents = subtotal_cents + tax_cents - discount_cents)
 );
 

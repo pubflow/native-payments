@@ -558,6 +558,7 @@ CREATE TABLE IF NOT EXISTS payments (
     subscription_id TEXT,
     user_id TEXT, -- Made optional for guest checkout
     organization_id TEXT,
+    project_id TEXT, -- Link to Project (Native support)
     payment_method_id TEXT,
     provider_id TEXT, -- Made optional for custom payments
     provider_payment_id TEXT, -- Final payment ID from provider
@@ -604,6 +605,7 @@ CREATE TABLE IF NOT EXISTS payments (
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,
 

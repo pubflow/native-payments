@@ -407,6 +407,8 @@ CREATE TABLE IF NOT EXISTS payments (
     provider_payment_id VARCHAR(255), -- Final payment ID from provider
     provider_intent_id VARCHAR(255), -- Intent ID from provider (e.g., Stripe payment intent)
     client_secret VARCHAR(255), -- Client secret for frontend confirmation
+    project_id VARCHAR(255), -- Link to Project (Native support)
+
 
     -- NEW UNIFIED PRICING SYSTEM
     subtotal_cents BIGINT NOT NULL, -- Base amount before taxes and discounts
@@ -447,6 +449,7 @@ CREATE TABLE IF NOT EXISTS payments (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL, -- Link to Project (Native support)
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL,
     FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id) ON DELETE SET NULL,
     FOREIGN KEY (provider_id) REFERENCES payment_providers(id) ON DELETE CASCADE,

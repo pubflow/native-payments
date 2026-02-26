@@ -574,6 +574,10 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     is_guest_subscription INTEGER NOT NULL DEFAULT 0, -- Track if this is a guest subscription (0 = false, 1 = true)
     guest_data TEXT, -- JSON string with guest information (email, name, phone, etc.)
     guest_email TEXT, -- Extracted guest email for indexing and queries
+
+    -- Billing address link (per-subscription override for fiscal/audit trail)
+    billing_address_id TEXT, -- FK → addresses.id. Address active at subscription time (intentionally no CASCADE)
+    FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -637,6 +641,9 @@ CREATE TABLE IF NOT EXISTS payments (
     guest_data TEXT, -- JSON string with guest information (email, name, phone, etc.)
     guest_email TEXT, -- Extracted guest email for indexing and queries
 
+    -- Billing address link (fiscal/audit trail)
+    billing_address_id TEXT, -- FK → addresses.id. Address active at payment time (intentionally no CASCADE)
+
     -- Coupon tracking
     applied_coupons TEXT, -- JSON string of applied coupons with details
 
@@ -645,6 +652,7 @@ CREATE TABLE IF NOT EXISTS payments (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
 
+    FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,

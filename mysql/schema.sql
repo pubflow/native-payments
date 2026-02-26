@@ -137,11 +137,6 @@ CREATE TABLE IF NOT EXISTS project_members (
     -- Universal Role (native-payments compatibility)
     role VARCHAR(50) NOT NULL DEFAULT 'member', -- 'owner', 'admin', 'editor', 'viewer', 'member'
     
-    -- Pubflow Specific Extensions (Removed)
-    -- role_id VARCHAR(36),
-    -- restricted_environments JSON,
-    -- custom_permissions JSON,
-    
     -- Invitation & Status System
     status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'active', 'pending', 'suspended', 'invited'
     invited_by VARCHAR(36),
@@ -418,6 +413,10 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     is_guest_subscription BOOLEAN NOT NULL DEFAULT FALSE, -- Track if this is a guest subscription
     guest_data JSON, -- JSON data with guest information (email, name, phone, etc.)
     guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
+
+    -- Billing address link (per-subscription override for fiscal/audit trail)
+    billing_address_id VARCHAR(255), -- FK → addresses.id. Address active at subscription time (intentionally no CASCADE)
+    FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -475,6 +474,9 @@ CREATE TABLE IF NOT EXISTS payments (
     guest_data JSON, -- JSON object with guest information (email, name, phone, etc.)
     guest_email VARCHAR(255), -- Extracted guest email for indexing and queries
 
+    -- Billing address link (fiscal/audit trail)
+    billing_address_id VARCHAR(255), -- FK → addresses.id. Address active at payment time (intentionally no CASCADE)
+
     -- Coupon tracking
     applied_coupons JSON, -- Array of applied coupons with details
 
@@ -483,6 +485,7 @@ CREATE TABLE IF NOT EXISTS payments (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
 
+    FOREIGN KEY (billing_address_id) REFERENCES addresses(id) ON DELETE SET NULL,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,

@@ -267,13 +267,20 @@ CREATE TABLE IF NOT EXISTS addresses (
     organization_id VARCHAR(255),
     address_type VARCHAR(50) NOT NULL, -- 'billing', 'shipping', 'both'
     is_default BOOLEAN NOT NULL DEFAULT false,
-    name VARCHAR(255),
-    line1 VARCHAR(255) NOT NULL,
+    is_partial BOOLEAN NOT NULL DEFAULT false, -- partial address (country + postal_code only, for fast checkout/fiscal)
+    is_business BOOLEAN NOT NULL DEFAULT false, -- true = business/B2B billing address; false = personal/B2C
+    business_name VARCHAR(255), -- Legal registered name of the business (e.g., 'ACME Corp S.A. de C.V.')
+    tax_id VARCHAR(100), -- Tax identifier value (e.g., 'MX-RFC-123456-ABC', 'US-EIN-123456789')
+    tax_id_type VARCHAR(50), -- Tax ID type: 'vat' (EU), 'ein' (US employer), 'ssn' (US individual),
+                             -- 'rfc' (MX), 'cnpj' (BR company), 'cpf' (BR individual), 'gst' (AU/CA/IN),
+                             -- 'nit' (CO), 'cuit' (AR), 'nif'/'cif' (ES), 'siren' (FR), 'kvk' (NL), 'other'
+    name VARCHAR(255), -- Contact/cardholder name (human name, not the business entity)
+    line1 VARCHAR(255), -- nullable for partial addresses
     line2 VARCHAR(255),
-    city VARCHAR(255) NOT NULL,
+    city VARCHAR(255), -- nullable for partial addresses
     state VARCHAR(255),
-    postal_code VARCHAR(50) NOT NULL,
-    country VARCHAR(2) NOT NULL, -- ISO 2-letter country code
+    postal_code VARCHAR(50), -- nullable for partial addresses (though strongly recommended for AVS)
+    country VARCHAR(2) NOT NULL, -- ISO 2-letter country code (always required)
     phone VARCHAR(50),
     email VARCHAR(255),
     alias VARCHAR(255), -- User-friendly name for the address (e.g., "Home", "Office", "Mom's house")
@@ -285,7 +292,9 @@ CREATE TABLE IF NOT EXISTS addresses (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true) -- Must belong to either a user, organization, or be a guest
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = true), -- Must belong to either a user, organization, or be a guest
+    CHECK (is_partial = true OR (line1 IS NOT NULL AND city IS NOT NULL)), -- full addresses require line1 and city
+    CHECK (is_business = false OR business_name IS NOT NULL) -- business addresses require business_name
 );
 
 CREATE TRIGGER update_addresses_timestamp

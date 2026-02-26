@@ -276,13 +276,20 @@ CREATE TABLE IF NOT EXISTS addresses (
     organization_id TEXT,
     address_type TEXT NOT NULL, -- 'billing', 'shipping', 'both'
     is_default INTEGER NOT NULL DEFAULT 0,
-    name TEXT,
-    line1 TEXT NOT NULL,
+    is_partial INTEGER NOT NULL DEFAULT 0, -- 1 = partial address (country + postal_code only, for fast checkout/fiscal); 0 = full address required
+    is_business INTEGER NOT NULL DEFAULT 0, -- 1 = business/B2B billing address; 0 = personal/B2C
+    business_name TEXT, -- Legal registered name of the business (e.g., 'ACME Corp S.A. de C.V.')
+    tax_id TEXT, -- Tax identifier value (e.g., 'MX-RFC-123456-ABC', 'US-EIN-123456789')
+    tax_id_type TEXT, -- Type of tax ID: 'vat' (EU), 'ein' (US employer), 'ssn' (US individual),
+                     -- 'rfc' (MX), 'cnpj' (BR company), 'cpf' (BR individual), 'gst' (AU/CA/IN),
+                     -- 'nit' (CO), 'cuit' (AR), 'nif'/'cif' (ES), 'siren' (FR), 'kvk' (NL), 'other'
+    name TEXT, -- Contact/cardholder name (human name, not the business entity)
+    line1 TEXT, -- nullable for partial addresses
     line2 TEXT,
-    city TEXT NOT NULL,
+    city TEXT, -- nullable for partial addresses
     state TEXT,
-    postal_code TEXT NOT NULL,
-    country TEXT NOT NULL, -- ISO 2-letter country code
+    postal_code TEXT, -- nullable for partial addresses (though strongly recommended for AVS)
+    country TEXT NOT NULL, -- ISO 2-letter country code (always required)
     phone TEXT,
     email TEXT,
     alias TEXT, -- User-friendly name for the address (e.g., "Home", "Office", "Mom's house")
@@ -294,7 +301,9 @@ CREATE TABLE IF NOT EXISTS addresses (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1) -- Must belong to either a user, organization, or be a guest
+    CHECK (user_id IS NOT NULL OR organization_id IS NOT NULL OR is_guest = 1), -- Must belong to either a user, organization, or be a guest
+    CHECK (is_partial = 1 OR (line1 IS NOT NULL AND city IS NOT NULL)), -- full addresses require line1 and city
+    CHECK (is_business = 0 OR business_name IS NOT NULL) -- business addresses require business_name
 );
 
 -- Trigger for updated_at on addresses

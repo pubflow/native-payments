@@ -588,6 +588,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS payment_webhooks (
     id VARCHAR(255) PRIMARY KEY,
     provider_id VARCHAR(50) NOT NULL,
+    provider_event_id VARCHAR(255),
     event_type VARCHAR(100) NOT NULL, -- 'payment.succeeded', 'subscription.created', etc.
     payload JSON NOT NULL,
     processed BOOLEAN NOT NULL DEFAULT false,
@@ -797,6 +798,7 @@ CREATE INDEX idx_invoices_status ON invoices(status);
 
 CREATE INDEX idx_payment_webhooks_provider_id ON payment_webhooks(provider_id);
 CREATE INDEX idx_payment_webhooks_processed ON payment_webhooks(processed);
+CREATE UNIQUE INDEX idx_payment_webhooks_provider_event_unique ON payment_webhooks(provider_id, provider_event_id);
 
 CREATE INDEX idx_payment_events_entity_type_entity_id ON payment_events(entity_type, entity_id);
 
